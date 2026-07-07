@@ -1,0 +1,8 @@
+# downloaded corpora — too large for git (~7.4 GB)
+crawls/*/documents/
+
+# personal / unrelated files
+Yaser - Sawab - Newroz Telecom.pdf
+
+__pycache__/
+*.pyc

@@ -1,0 +1,68 @@
+[
+  {
+    "site": "govarametin",
+    "base": "http://govarametin.com/",
+    "pages_total": 1,
+    "pages_ok": 1,
+    "documents": 0,
+    "doc_bytes": 0,
+    "errors": 0,
+    "stopped_reason": "queue exhausted (complete)",
+    "duration_s": 0.3
+  },
+  {
+    "site": "xaniagency",
+    "base": "https://xaniagency.com/",
+    "pages_total": 0,
+    "pages_ok": 0,
+    "documents": 0,
+    "doc_bytes": 0,
+    "errors": 3,
+    "stopped_reason": "queue exhausted (complete)",
+    "duration_s": 7.5
+  },
+  {
+    "site": "uod",
+    "base": "https://journal.uod.ac/index.php/uodjournal",
+    "pages_total": 53,
+    "pages_ok": 53,
+    "documents": 1,
+    "doc_bytes": 800467,
+    "errors": 0,
+    "stopped_reason": "queue exhausted (complete)",
+    "duration_s": 9.4
+  },
+  {
+    "site": "govarabadinan",
+    "base": "https://govarabadinan.blogspot.com/",
+    "pages_total": 191,
+    "pages_ok": 187,
+    "documents": 0,
+    "doc_bytes": 0,
+    "errors": 21,
+    "stopped_reason": "queue exhausted (complete)",
+    "duration_s": 30.6
+  },
+  {
+    "site": "spirez",
+    "base": "https://spirez.org/",
+    "pages_total": 163,
+    "pages_ok": 161,
+    "documents": 2291,
+    "doc_bytes": 1557885186,
+    "errors": 5,
+    "stopped_reason": "queue exhausted (complete)",
+    "duration_s": 408.2
+  },
+  {
+    "site": "zcks",
+    "base": "https://zcks.uoz.edu.krd/",
+    "pages_total": 657,
+    "pages_ok": 539,
+    "documents": 713,
+    "doc_bytes": 4286857508,
+    "errors": 118,
+    "stopped_reason": "queue exhausted (complete)",
+    "duration_s": 1038.4
+  }
+]

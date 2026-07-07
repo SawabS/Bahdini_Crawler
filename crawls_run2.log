@@ -1,0 +1,54 @@
+[14:34:28] [uod] robots.txt loaded (463 lines)
+[14:34:29] [xaniagency] robots.txt loaded (5 lines)
+[14:34:29] [xaniagency] sitemap https://xaniagency.com/wp-sitemap-posts-post-1.xml: 2000 URLs (cumulative at this node)
+[14:34:30] [xaniagency] sitemap https://xaniagency.com/wp-sitemap-posts-post-2.xml: 2000 URLs (cumulative at this node)
+[14:34:30] [xaniagency] sitemap https://xaniagency.com/wp-sitemap-posts-post-3.xml: 2000 URLs (cumulative at this node)
+[14:34:30] [xaniagency] sitemap https://xaniagency.com/wp-sitemap-posts-post-4.xml: 2000 URLs (cumulative at this node)
+[14:34:30] [xaniagency] sitemap https://xaniagency.com/wp-sitemap-posts-post-5.xml: 2000 URLs (cumulative at this node)
+[14:34:31] [uod] sitemap https://journal.uod.ac/index.php/uodjournal/sitemap: 3034 URLs (cumulative at this node)
+[14:34:31] [uod] sitemaps yielded 3034 URLs total
+[14:34:31] [xaniagency] sitemap https://xaniagency.com/wp-sitemap-posts-post-6.xml: 2000 URLs (cumulative at this node)
+[14:34:31] [xaniagency] sitemap https://xaniagency.com/wp-sitemap-posts-post-7.xml: 2000 URLs (cumulative at this node)
+[14:34:31] [xaniagency] sitemap https://xaniagency.com/wp-sitemap-posts-post-8.xml: 2000 URLs (cumulative at this node)
+[14:34:32] [xaniagency] sitemap https://xaniagency.com/wp-sitemap-posts-post-9.xml: 2000 URLs (cumulative at this node)
+[14:34:32] [xaniagency] sitemap https://xaniagency.com/wp-sitemap-posts-post-10.xml: 621 URLs (cumulative at this node)
+[14:34:32] [xaniagency] sitemap https://xaniagency.com/wp-sitemap-posts-page-1.xml: 12 URLs (cumulative at this node)
+[14:34:32] [xaniagency] sitemap https://xaniagency.com/wp-sitemap-posts-playlist-1.xml: 1 URLs (cumulative at this node)
+[14:34:32] [xaniagency] sitemap https://xaniagency.com/wp-sitemap-taxonomies-category-1.xml: 38 URLs (cumulative at this node)
+[14:34:32] [xaniagency] sitemap https://xaniagency.com/wp-sitemap-taxonomies-post_tag-1.xml: 23 URLs (cumulative at this node)
+[14:34:32] [xaniagency] sitemap https://xaniagency.com/wp-sitemap-taxonomies-post_format-1.xml: 2 URLs (cumulative at this node)
+[14:34:33] [xaniagency] sitemap https://xaniagency.com/wp-sitemap-users-1.xml: 10 URLs (cumulative at this node)
+[14:34:33] [xaniagency] sitemap https://xaniagency.com/wp-sitemap.xml: 18707 URLs (cumulative at this node)
+[14:34:33] [xaniagency] sitemaps yielded 18707 URLs total
+[14:34:42] [uod] 100 pages, 0 docs, queue=3548
+[14:34:54] [uod] 200 pages, 0 docs, queue=4134
+[14:35:06] [uod] 300 pages, 0 docs, queue=4722
+[14:35:18] [uod] 400 pages, 0 docs, queue=5320
+[14:35:30] [uod] 500 pages, 0 docs, queue=5920
+[14:35:41] [uod] 600 pages, 0 docs, queue=6518
+[14:35:52] [uod] 700 pages, 0 docs, queue=7119
+[14:36:04] [uod] 800 pages, 0 docs, queue=7706
+[14:36:15] [uod] 900 pages, 0 docs, queue=8292
+[14:36:17] [xaniagency] 100 pages, 0 docs, queue=18703
+[14:36:27] [uod] 1000 pages, 0 docs, queue=8892
+[14:36:38] [uod] 1100 pages, 0 docs, queue=9491
+[14:36:50] [uod] 1200 pages, 0 docs, queue=10078
+[14:37:02] [uod] 1300 pages, 0 docs, queue=10676
+[14:37:13] [uod] 1400 pages, 0 docs, queue=11262
+[14:37:24] [uod] 1500 pages, 0 docs, queue=11836
+[14:37:35] [uod] 1600 pages, 0 docs, queue=12422
+[14:37:46] [uod] 1700 pages, 0 docs, queue=13006
+[14:37:58] [uod] 1800 pages, 0 docs, queue=13592
+[14:38:06] [xaniagency] 200 pages, 0 docs, queue=18703
+[14:38:10] [uod] 1900 pages, 0 docs, queue=14180
+[14:38:21] [uod] 2000 pages, 0 docs, queue=14779
+[14:38:33] [uod] 2100 pages, 0 docs, queue=15352
+[14:38:44] [uod] 2200 pages, 0 docs, queue=15926
+[14:38:56] [uod] 2300 pages, 0 docs, queue=16525
+[14:39:09] [uod] 2400 pages, 0 docs, queue=17117
+[14:39:20] [uod] 2500 pages, 0 docs, queue=17701
+[14:39:21] [uod] DONE: {"site": "uod", "base": "https://journal.uod.ac/index.php/uodjournal", "pages_total": 2514, "pages_ok": 2507, "documents": 0, "doc_bytes": 0, "errors": 7, "stopped_reason": "page cap (2500) reached", "duration_s": 293.2}
+[14:39:51] [xaniagency] 300 pages, 0 docs, queue=18701
+[14:41:39] [xaniagency] 400 pages, 0 docs, queue=18699
+[14:43:26] [xaniagency] 500 pages, 0 docs, queue=18696
+[14:45:16] [xaniagency] 600 pages, 0 docs, queue=18693
