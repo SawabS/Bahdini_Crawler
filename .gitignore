@@ -1,6 +1,12 @@
 # downloaded corpora — too large for git (~7.4 GB)
 crawls/*/documents/
 
+# Facebook group scrape: PDFs too large for git (~5.7 GB)
+AbdulrahmanBamarni_PartokxanaElectroni/pdfs/
+# Facebook session cookies — never commit
+AbdulrahmanBamarni_PartokxanaElectroni/.fb_profile/
+AbdulrahmanBamarni_PartokxanaElectroni/.vscode/
+
 # personal / unrelated files
 Yaser - Sawab - Newroz Telecom.pdf
 

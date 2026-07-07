@@ -1,0 +1,5 @@
+In pdf_table.md
+
+Change the following IDs from NO to YES: 8, 16, 
+
+Change the following IDs from YES to NO: 7, 9, 10, 11, 

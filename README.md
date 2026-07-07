@@ -29,6 +29,11 @@ is ISP-blocked, one server is infected with cloaking malware).
 
 The source list lives in [base_urls.md](base_urls.md).
 
+Additionally, [AbdulrahmanBamarni_PartokxanaElectroni/](AbdulrahmanBamarni_PartokxanaElectroni/)
+holds a separate Playwright-based scrape of the **Partokxana Electroni**
+Facebook group (1,318 PDFs, ~6 GB, mixed Badini/Arabic/Sorani — Badini
+classification tracked in its `pdf_table.md`). See its own README.
+
 ## Repository layout
 
 ```
@@ -41,6 +46,7 @@ Bahdini_Crawler/
 ├── scripts/
 │   └── token_estimate.py   # PDF sampling + language classification
 ├── logs/                   # raw session logs of each crawl run
+├── AbdulrahmanBamarni_PartokxanaElectroni/  # Facebook-group PDF scrape (see its README)
 └── crawls/
     ├── crawl_summary.json  # machine-readable per-site summary
     └── <site>/
