@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Bahdini_Crawler — sitemap + recursive crawler with document harvesting.
+Bahdini_Crawler: sitemap + recursive crawler with document harvesting.
 
 For each configured site:
   1. Fetch robots.txt (best effort) and respect Disallow rules.
