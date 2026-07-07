@@ -111,7 +111,7 @@ SITES = [
         "base": "https://govarabadinan.blogspot.com/",
         "domains": {"govarabadinan.blogspot.com"},
         "sitemaps": ["https://govarabadinan.blogspot.com/sitemap.xml"],
-        "local_sitemaps": [os.path.join(ROOT, "govarabadinan.xml")],
+        "local_sitemaps": [os.path.join(ROOT, "config", "govarabadinan.xml")],
     },
     {
         "name": "zcks",

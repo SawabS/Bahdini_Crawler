@@ -1,22 +1,41 @@
 # Bahdini Crawler
 
-A web crawler for collecting Badini (Bahdini) Kurdish text corpora for LLM
-fine-tuning. It crawls a configured list of Badini-language websites,
-maps their full page structure, and downloads every publicly linked document
-(PDF, DOC/DOCX, XLS/XLSX, PPT/PPTX, ZIP and more).
+Data collection for **Badini (Bahdini) Kurdish** LLM fine-tuning. This repo
+contains two collectors and the metadata of everything they harvested:
+
+1. **Web crawler** ([crawler.py](crawler.py)): crawls six Badini websites,
+   maps their full page structure, and downloads every publicly linked
+   document (PDF, DOC/DOCX, XLS/XLSX, PPT/PPTX, ZIP and more).
+2. **Facebook group scraper**
+   ([AbdulrahmanBamarni_PartokxanaElectroni/](AbdulrahmanBamarni_PartokxanaElectroni/)):
+   a Playwright-based scraper for the "Partokxana Electroni" (Electronic
+   Library) Facebook group.
+
+The downloaded files themselves (~13 GB) are kept out of git; this repo holds
+the code, configuration, structure maps, manifests, and reports.
+
+## Where to find what
+
+| I want to... | Go to |
+|---|---|
+| See what was collected and the token estimate | [docs/CRAWL_REPORT.md](docs/CRAWL_REPORT.md) |
+| See what went wrong (blocked site, malware finding, rate limits) | [docs/BLOCKERS.md](docs/BLOCKERS.md) |
+| See the source sites, their robots.txt and sitemaps | [config/base_urls.md](config/base_urls.md) |
+| Browse a site's page structure | `crawls/<site>/site_structure.md` |
+| Look up a downloaded file's origin URL | `crawls/<site>/documents.csv` |
+| Check the Facebook scrape and its Badini/Arabic tagging | [AbdulrahmanBamarni_PartokxanaElectroni/](AbdulrahmanBamarni_PartokxanaElectroni/) (`pdf_table.md`, `manifest.json`) |
+| Re-run or extend a crawl | [Quick start](#quick-start) below |
 
 ## Results at a glance
 
-- **4,485 documents (~7.4 GB)** harvested from 4 sources
-- **~10,000 pages** crawled and mapped
-- **~7.1M words of extractable Badini text (~9 to 14M LLM tokens)**, with a
-  further 5 to 14M words locked in scanned PDFs that need OCR
+| Collector | Yield |
+|---|---|
+| Web crawler (4 of 6 sites yielded documents) | 4,485 documents, ~7.4 GB, ~10,000 pages mapped |
+| Facebook group scrape | 1,318 PDFs, ~6 GB (mixed Badini/Arabic/Sorani, tagged in `pdf_table.md`) |
+| Extractable Badini text (web PDFs, measured by sampling) | ~7.1M words, roughly 9 to 14M LLM tokens |
+| Locked in scanned PDFs, needs OCR | potentially 5 to 14M more words |
 
-See [CRAWL_REPORT.md](CRAWL_REPORT.md) for full results and the token
-estimate, and [BLOCKERS.md](BLOCKERS.md) for problems encountered (one source
-is ISP-blocked, one server is infected with cloaking malware).
-
-## Sources
+### Web sources
 
 | Source | Type | Yield |
 |---|---|---|
@@ -25,68 +44,80 @@ is ISP-blocked, one server is infected with cloaking malware).
 | [journal.uod.ac](https://journal.uod.ac/index.php/uodjournal) | University of Duhok journal (OJS) | 1,481 article PDFs |
 | [govarabadinan.blogspot.com](https://govarabadinan.blogspot.com/) | Badini blog magazine | HTML posts only, structure mapped |
 | [xaniagency.com](https://xaniagency.com/) | Kurdish news agency (WordPress) | HTML articles only, crawl stopped early |
-| [govarametin.com](https://govarametin.com/) | Badini magazine | blocked at ISP level, see BLOCKERS.md |
-
-The source list lives in [base_urls.md](base_urls.md).
-
-Additionally, [AbdulrahmanBamarni_PartokxanaElectroni/](AbdulrahmanBamarni_PartokxanaElectroni/)
-holds a separate Playwright-based scrape of the **Partokxana Electroni**
-Facebook group (1,318 PDFs, ~6 GB, mixed Badini/Arabic/Sorani — Badini
-classification tracked in its `pdf_table.md`). See its own README.
+| [govarametin.com](https://govarametin.com/) | Badini magazine | blocked at ISP level, see [docs/BLOCKERS.md](docs/BLOCKERS.md) |
 
 ## Repository layout
 
 ```
 Bahdini_Crawler/
-├── crawler.py              # the crawler (configuration in the SITES list at the top)
-├── base_urls.md            # source sites, robots.txt and sitemap notes
-├── govarabadinan.xml       # locally supplied sitemap for the Blogspot source
-├── CRAWL_REPORT.md         # full crawl results + Badini token estimate
-├── BLOCKERS.md             # blockers and errors encountered
+├── README.md                  <- you are here
+├── crawler.py                 # web crawler entry point (site configs in SITES at the top)
+│
+├── config/
+│   ├── base_urls.md           # source sites, robots.txt and sitemap notes
+│   └── govarabadinan.xml      # locally supplied sitemap for the Blogspot source
+│
+├── docs/
+│   ├── CRAWL_REPORT.md        # full crawl results + Badini token estimate
+│   └── BLOCKERS.md            # blockers and errors encountered
+│
 ├── scripts/
-│   └── token_estimate.py   # PDF sampling + language classification
-├── logs/                   # raw session logs of each crawl run
-├── AbdulrahmanBamarni_PartokxanaElectroni/  # Facebook-group PDF scrape (see its README)
-└── crawls/
-    ├── crawl_summary.json  # machine-readable per-site summary
-    └── <site>/
-        ├── documents/      # downloaded files (NOT in git, ~7.4 GB)
-        ├── pages.jsonl     # one JSON record per crawled page
-        ├── urls.csv        # flat URL inventory
-        ├── documents.csv   # doc URL -> source page -> local file
-        ├── site_structure.md  # hierarchical page tree
-        └── errors.log      # per-URL failures
+│   └── token_estimate.py      # PDF sampling + Kurdish text classification
+│
+├── logs/                      # raw session logs of each crawl run
+│
+├── crawls/                    # web crawler output, one folder per site
+│   ├── crawl_summary.json     # machine-readable per-site summary
+│   └── <site>/
+│       ├── documents/         # downloaded files (NOT in git, ~7.4 GB)
+│       ├── pages.jsonl        # one JSON record per crawled page
+│       ├── urls.csv           # flat URL inventory
+│       ├── documents.csv      # doc URL -> source page -> local file
+│       ├── site_structure.md  # hierarchical page tree
+│       └── errors.log         # per-URL failures
+│
+└── AbdulrahmanBamarni_PartokxanaElectroni/   # Facebook group scrape (own README)
+    ├── facebook_pdf_downloader.py  # Playwright scraper (login, scan, download)
+    ├── pdf_table.md           # per-PDF list with is_bahdini / is_arabic tags
+    ├── manifest.json          # per-post download log (makes runs resumable)
+    ├── permalinks.json        # harvested group post IDs
+    ├── legacy/                # superseded first version of the scraper
+    └── pdfs/                  # downloaded PDFs (NOT in git, ~6 GB)
 ```
 
-## Usage
+## Quick start
 
-Requirements: Python 3.10+ with `requests`, `beautifulsoup4`, and `lxml`.
+### Web crawler
+
+Requires Python 3.10+ with `requests`, `beautifulsoup4`, `lxml`.
 
 ```bash
 python3 crawler.py                  # crawl every configured site
 python3 crawler.py zcks uod         # crawl selected sites only
 ```
 
-Each site is a dict in the `SITES` list in [crawler.py](crawler.py) with
-optional per-site overrides (`delay`, `workers`, `max_pages`, `sitemaps`,
+Each site is one dict in the `SITES` list in [crawler.py](crawler.py) with
+optional overrides (`delay`, `workers`, `max_pages`, `sitemaps`,
 `extra_seeds`, `force_http`). Adding a new source means adding one entry.
 
-How a site is crawled:
+Pipeline per site: robots.txt (respected, sitemap declarations harvested),
+recursive sitemap parsing, BFS link crawl to depth 10, document detection by
+extension / OJS download routes / Content-Type, and a priority download queue
+so page backlogs can never starve document downloads.
 
-1. Fetch robots.txt (rules respected, sitemap declarations harvested)
-2. Parse sitemaps recursively (sitemap indexes and gzip supported)
-3. BFS-crawl internal links up to depth 10
-4. Detect documents by extension, by OJS-style download routes, and by
-   response Content-Type
-5. Download documents through a priority queue so large page backlogs can
-   never starve downloads
+### Token estimate
 
-To estimate the Kurdish text volume of the downloaded PDFs
-(requires `pdftotext` from poppler-utils):
+Requires `pdftotext` (poppler-utils).
 
 ```bash
 python3 scripts/token_estimate.py
 ```
+
+### Facebook scraper
+
+See the dedicated
+[README](AbdulrahmanBamarni_PartokxanaElectroni/README.md)
+(needs Playwright and a Facebook account that is a member of the group).
 
 ## Next steps
 
@@ -94,3 +125,4 @@ python3 scripts/token_estimate.py
 - Add article-text extraction to persist HTML content from govarabadinan
   and xaniagency
 - Re-crawl govarametin.com from an unfiltered network
+- Finish Badini/Arabic tagging in the Facebook scrape's `pdf_table.md`

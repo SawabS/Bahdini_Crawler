@@ -1,6 +1,6 @@
 # Bahdini Crawler: Crawl Report
 
-Crawl date: 2026-07-07. Crawler: [crawler.py](crawler.py) (Python, requests + BeautifulSoup/lxml).
+Crawl date: 2026-07-07. Crawler: [crawler.py](../crawler.py) (Python, requests + BeautifulSoup/lxml).
 
 Method per site: robots.txt, then sitemap discovery (recursive, index + gz), then BFS link crawl (depth up to 10), then document detection by extension/route with Content-Type verification, using a prioritized download queue.
 
@@ -27,7 +27,7 @@ Each `crawls/<site>/` folder contains:
 - `site_structure.md`: full hierarchical page-structure tree
 - `errors.log`: per-URL failures
 
-Raw crawl session logs live in [logs/](logs/).
+Raw crawl session logs live in [logs/](../logs/).
 
 ### spirez.org
 Badini literary magazine. 161/163 pages OK. The whole archive is exposed as per-issue and per-article PDFs, 2,291 files in total. About 76% of sampled PDFs are image-only scans (est. ~1,730 files) with no text layer, so OCR is required to unlock their text.
@@ -39,7 +39,7 @@ Badini literary magazine. 161/163 pages OK. The whole archive is exposed as per-
 All ~1,482 articles across 40 issues crawled; 1,481 article PDFs downloaded (a handful of galleys return 403 because they are restricted). The crawl stopped at its page cap with ~17k URLs still queued, but those are exclusively citation-format permutations (APA/IEEE/BibTeX and so on, generated per article) with no content value, so article and issue coverage is complete. Language mix of sampled articles: ~48% English, ~42% Arabic, ~10% Kurdish.
 
 ### govarabadinan.blogspot.com
-Badini blog magazine. 187/191 pages OK via the Blogger sitemap plus the provided [govarabadinan.xml](govarabadinan.xml). Publishes pure HTML posts; no downloadable documents exist. Post text is not persisted by this crawler (structure only), so a text-extraction pass would be needed to harvest it as corpus data.
+Badini blog magazine. 187/191 pages OK via the Blogger sitemap plus the provided [govarabadinan.xml](../config/govarabadinan.xml). Publishes pure HTML posts; no downloadable documents exist. Post text is not persisted by this crawler (structure only), so a text-extraction pass would be needed to harvest it as corpus data.
 
 ### xaniagency.com
 WordPress news agency, ~18,700 URLs in its sitemap. Crawled ~3,600 pages with zero documents found: it publishes HTML articles only, so the crawl was stopped early on request. Like govarabadinan, harvesting its text would need an article-text extraction pass, plus throttling (the site rate-limits with HTTP 429).
@@ -49,7 +49,7 @@ Unreachable from this network due to ISP-level filtering. See [BLOCKERS.md](BLOC
 
 ## Estimated Badini token volume (extractable text, PDFs only)
 
-Method: random sample per site (45 to 60 PDFs), `pdftotext` extraction, script/language classification (Kurdish Arabic-script marker letters ێ ۆ ڤ ڕ ڵ vs plain Arabic vs Latin), extrapolated to the full corpus. Script: [scripts/token_estimate.py](scripts/token_estimate.py).
+Method: random sample per site (45 to 60 PDFs), `pdftotext` extraction, script/language classification (Kurdish Arabic-script marker letters ێ ۆ ڤ ڕ ڵ vs plain Arabic vs Latin), extrapolated to the full corpus. Script: [scripts/token_estimate.py](../scripts/token_estimate.py).
 
 | Site | Est. Kurdish words | Notes |
 |---|---|---|
@@ -70,4 +70,4 @@ python3 crawler.py                 # all sites
 python3 crawler.py zcks uod        # selected sites
 ```
 
-Site configs (sitemaps, per-site delay/workers/page caps) are in the `SITES` list at the top of [crawler.py](crawler.py).
+Site configs (sitemaps, per-site delay/workers/page caps) are in the `SITES` list at the top of [crawler.py](../crawler.py).

@@ -1,9 +1,9 @@
-# downloaded corpora — too large for git (~7.4 GB)
+# downloaded corpora: too large for git (~7.4 GB)
 crawls/*/documents/
 
-# Facebook group scrape: PDFs too large for git (~5.7 GB)
+# Facebook group scrape: PDFs too large for git (~6 GB)
 AbdulrahmanBamarni_PartokxanaElectroni/pdfs/
-# Facebook session cookies — never commit
+# Facebook session cookies: never commit
 AbdulrahmanBamarni_PartokxanaElectroni/.fb_profile/
 AbdulrahmanBamarni_PartokxanaElectroni/.vscode/
 
