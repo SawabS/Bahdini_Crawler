@@ -1,7 +1,7 @@
 # Bahdini Crawler
 
 Data collection for **Badini (Bahdini) Kurdish** LLM fine-tuning. This repo
-contains two collectors and the metadata of everything they harvested:
+contains three collectors and the metadata of everything they harvested:
 
 1. **Web crawler** ([crawler.py](crawler.py)): crawls six Badini websites,
    maps their full page structure, and downloads every publicly linked
@@ -10,8 +10,12 @@ contains two collectors and the metadata of everything they harvested:
    ([AbdulrahmanBamarni_PartokxanaElectroni/](AbdulrahmanBamarni_PartokxanaElectroni/)):
    a Playwright-based scraper for the "Partokxana Electroni" (Electronic
    Library) Facebook group.
+3. **Telegram channel downloader** ([telegram/](telegram/)): a Telethon-based
+   downloader that pulls every document attachment from three Badini book
+   channels, and also follows links posted in messages (direct files, Google
+   Drive, MediaFire, Dropbox).
 
-The downloaded files themselves (~13 GB) are kept out of git; this repo holds
+The downloaded files themselves (~25 GB) are kept out of git; this repo holds
 the code, configuration, structure maps, manifests, and reports.
 
 ## Where to find what
@@ -24,6 +28,7 @@ the code, configuration, structure maps, manifests, and reports.
 | Browse a site's page structure | `crawls/<site>/site_structure.md` |
 | Look up a downloaded file's origin URL | `crawls/<site>/documents.csv` |
 | Check the Facebook scrape and its Badini/Arabic tagging | [AbdulrahmanBamarni_PartokxanaElectroni/](AbdulrahmanBamarni_PartokxanaElectroni/) (`pdf_table.md`, `manifest.json`) |
+| Look up a Telegram download's source message or link | `telegram/downloads/<channel>/.download_state.json` |
 | Re-run or extend a crawl | [Quick start](#quick-start) below |
 
 ## Results at a glance
@@ -32,6 +37,7 @@ the code, configuration, structure maps, manifests, and reports.
 |---|---|
 | Web crawler (4 of 6 sites yielded documents) | 4,485 documents, ~7.4 GB, ~10,000 pages mapped |
 | Facebook group scrape | 1,318 PDFs, ~6 GB (mixed Badini/Arabic/Sorani, tagged in `pdf_table.md`) |
+| Telegram channels (3 book channels) | 1,925 documents, ~12 GB (150 of them via posted links) |
 | Extractable Badini text (web PDFs, measured by sampling) | ~7.1M words, roughly 9 to 14M LLM tokens |
 | Locked in scanned PDFs, needs OCR | potentially 5 to 14M more words |
 
@@ -45,6 +51,14 @@ the code, configuration, structure maps, manifests, and reports.
 | [govarabadinan.blogspot.com](https://govarabadinan.blogspot.com/) | Badini blog magazine | HTML posts only, structure mapped |
 | [xaniagency.com](https://xaniagency.com/) | Kurdish news agency (WordPress) | HTML articles only, crawl stopped early |
 | [govarametin.com](https://govarametin.com/) | Badini magazine | blocked at ISP level, see [docs/BLOCKERS.md](docs/BLOCKERS.md) |
+
+### Telegram sources
+
+| Channel | Yield |
+|---|---|
+| [t.me/Badini_book](https://t.me/Badini_book) | 993 documents, ~5.7 GB |
+| [t.me/jihana_pertuken_pdf](https://t.me/jihana_pertuken_pdf) | 774 documents, ~4.6 GB |
+| [t.me/pertok_badini](https://t.me/pertok_badini) | 158 documents, ~1.6 GB |
 
 ## Repository layout
 
@@ -76,13 +90,22 @@ Bahdini_Crawler/
 │       ├── site_structure.md  # hierarchical page tree
 │       └── errors.log         # per-URL failures
 │
-└── AbdulrahmanBamarni_PartokxanaElectroni/   # Facebook group scrape (own README)
-    ├── facebook_pdf_downloader.py  # Playwright scraper (login, scan, download)
-    ├── pdf_table.md           # per-PDF list with is_bahdini / is_arabic tags
-    ├── manifest.json          # per-post download log (makes runs resumable)
-    ├── permalinks.json        # harvested group post IDs
-    ├── legacy/                # superseded first version of the scraper
-    └── pdfs/                  # downloaded PDFs (NOT in git, ~6 GB)
+├── AbdulrahmanBamarni_PartokxanaElectroni/   # Facebook group scrape (own README)
+│   ├── facebook_pdf_downloader.py  # Playwright scraper (login, scan, download)
+│   ├── pdf_table.md           # per-PDF list with is_bahdini / is_arabic tags
+│   ├── manifest.json          # per-post download log (makes runs resumable)
+│   ├── permalinks.json        # harvested group post IDs
+│   ├── legacy/                # superseded first version of the scraper
+│   └── pdfs/                  # downloaded PDFs (NOT in git, ~6 GB)
+│
+└── telegram/                  # Telegram channel downloader
+    ├── download_telegram_documents.py  # Telethon downloader (attachments + posted links)
+    ├── run_downloader.sh      # launcher (conda env, unbuffered output)
+    ├── requirements.txt       # Telethon, cryptg, aiohttp
+    ├── .telegram/             # login session (NOT in git, private)
+    └── downloads/             # one folder per channel
+        ├── <channel>/         # downloaded books (NOT in git, ~12 GB)
+        └── <channel>/.download_state.json  # manifest: message ids, sizes, link outcomes
 ```
 
 ## Quick start
@@ -119,6 +142,43 @@ See the dedicated
 [README](AbdulrahmanBamarni_PartokxanaElectroni/README.md)
 (needs Playwright and a Facebook account that is a member of the group).
 
+### Telegram downloader
+
+Requires the `ai` conda environment with the packages in
+[telegram/requirements.txt](telegram/requirements.txt). One-time setup: create
+an application at <https://my.telegram.org/apps> and export its credentials
+(never commit the API hash):
+
+```bash
+export TELEGRAM_API_ID='your_numeric_api_id'
+export TELEGRAM_API_HASH='your_api_hash'
+export TELEGRAM_PHONE='+964...'
+```
+
+Then:
+
+```bash
+telegram/run_downloader.sh                 # scan + download the three channels
+telegram/run_downloader.sh --dry-run       # preview without changing state
+telegram/run_downloader.sh --channel https://t.me/example   # another channel
+```
+
+The first run asks for the Telegram login code; the session is stored in
+`telegram/.telegram/` and must stay private. Runs are resumable: scans are
+checkpointed per channel, partial files continue where they stopped, and
+completed files are verified by size and PDF magic bytes before being kept.
+
+Speed comes from working around per-connection throttling on both transports:
+Telegram documents are fetched as 1 MiB chunks spread over eight parallel
+MTProto connections per data center, and large linked files use up to six
+parallel HTTP range requests. Posted links are followed automatically (direct
+files, Google Drive including the virus-scan interstitial, Google Docs,
+MediaFire download pages, Dropbox); dead and non-document links are remembered
+in `.download_state.json` and never probed twice. See
+`telegram/run_downloader.sh --help` for tuning flags
+(`--concurrent-downloads`, `--parallel-connections`, `--download-retries`,
+`--force-rescan`).
+
 ## Next steps
 
 - OCR the ~1,730 scanned spirez PDFs (largest untapped Badini pool)
@@ -126,3 +186,7 @@ See the dedicated
   and xaniagency
 - Re-crawl govarametin.com from an unfiltered network
 - Finish Badini/Arabic tagging in the Facebook scrape's `pdf_table.md`
+- Re-run the Telegram downloader periodically to pick up new posts
+  (incremental: only new messages are scanned)
+- Fetch the 9 Google Drive folders linked from Telegram posts by hand
+  (folder listings are not crawled automatically)
