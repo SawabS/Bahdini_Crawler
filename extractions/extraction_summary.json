@@ -1,0 +1,40 @@
+{
+  "telegram_badini_book": {
+    "documents": 993,
+    "by_status": {
+      "extracted": 791,
+      "needs_ocr": 128,
+      "extracted_suspect": 73,
+      "extracted_partial": 1
+    },
+    "extracted_chars": 145192419
+  },
+  "telegram_jihana_pertuken_pdf": {
+    "documents": 774,
+    "by_status": {
+      "extracted": 596,
+      "needs_ocr": 116,
+      "extracted_suspect": 59,
+      "extracted_partial": 2,
+      "error": 1
+    },
+    "extracted_chars": 111706649
+  },
+  "telegram_pertok_badini": {
+    "documents": 157,
+    "by_status": {
+      "extracted": 104,
+      "extracted_suspect": 10,
+      "needs_ocr": 42,
+      "extracted_partial": 1
+    },
+    "extracted_chars": 24872350
+  },
+  "sh2_unicodefixed_bahdini": {
+    "documents": 241,
+    "by_status": {
+      "extracted": 241
+    },
+    "extracted_chars": 6266370
+  }
+}

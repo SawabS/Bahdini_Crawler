@@ -1,0 +1,176 @@
+[telegram_badini_book] 993 .pdf files, 5 already done, 988 to process
+[telegram_badini_book] 25/988
+[telegram_badini_book] 50/988
+[telegram_badini_book] 75/988
+[telegram_badini_book] 100/988
+[telegram_badini_book] 125/988
+[telegram_badini_book] 150/988
+[telegram_badini_book] 175/988
+MuPDF error: format error: No default Layer config
+
+[telegram_badini_book] 200/988
+[telegram_badini_book] 225/988
+[telegram_badini_book] 250/988
+[telegram_badini_book] 275/988
+[telegram_badini_book] 300/988
+MuPDF error: format error: cmsOpenProfileFromMem failed
+
+[telegram_badini_book] 325/988
+[telegram_badini_book] 350/988
+[telegram_badini_book] 375/988
+[telegram_badini_book] 400/988
+[telegram_badini_book] 425/988
+[telegram_badini_book] 450/988
+[telegram_badini_book] 475/988
+[telegram_badini_book] 500/988
+[telegram_badini_book] 525/988
+[telegram_badini_book] 550/988
+[telegram_badini_book] 575/988
+[telegram_badini_book] 600/988
+MuPDF error: format error: No default Layer config
+
+[telegram_badini_book] 625/988
+[telegram_badini_book] 650/988
+[telegram_badini_book] 675/988
+[telegram_badini_book] 700/988
+[telegram_badini_book] 725/988
+[telegram_badini_book] 750/988
+[telegram_badini_book] 775/988
+[telegram_badini_book] 800/988
+[telegram_badini_book] 825/988
+[telegram_badini_book] 850/988
+[telegram_badini_book] 875/988
+[telegram_badini_book] 900/988
+[telegram_badini_book] 925/988
+[telegram_badini_book] 950/988
+[telegram_badini_book] 975/988
+[telegram_badini_book] 988/988
+[telegram_jihana_pertuken_pdf] 774 .pdf files, 5 already done, 769 to process
+[telegram_jihana_pertuken_pdf] 25/769
+MuPDF error: format error: non-page object in page tree
+
+[telegram_jihana_pertuken_pdf] 50/769
+[telegram_jihana_pertuken_pdf] 75/769
+[telegram_jihana_pertuken_pdf] 100/769
+[telegram_jihana_pertuken_pdf] 125/769
+[telegram_jihana_pertuken_pdf] 150/769
+[telegram_jihana_pertuken_pdf] 175/769
+[telegram_jihana_pertuken_pdf] 200/769
+[telegram_jihana_pertuken_pdf] 225/769
+[telegram_jihana_pertuken_pdf] 250/769
+[telegram_jihana_pertuken_pdf] 275/769
+[telegram_jihana_pertuken_pdf] 300/769
+[telegram_jihana_pertuken_pdf] 325/769
+[telegram_jihana_pertuken_pdf] 350/769
+[telegram_jihana_pertuken_pdf] 375/769
+[telegram_jihana_pertuken_pdf] 400/769
+[telegram_jihana_pertuken_pdf] 425/769
+[telegram_jihana_pertuken_pdf] 450/769
+MuPDF error: syntax error: no XObject subtype specified
+
+MuPDF error: syntax error: no XObject subtype specified
+
+MuPDF error: syntax error: no XObject subtype specified
+
+MuPDF error: syntax error: no XObject subtype specified
+
+MuPDF error: syntax error: no XObject subtype specified
+
+MuPDF error: syntax error: no XObject subtype specified
+
+MuPDF error: syntax error: no XObject subtype specified
+
+MuPDF error: syntax error: no XObject subtype specified
+
+MuPDF error: syntax error: no XObject subtype specified
+
+MuPDF error: syntax error: no XObject subtype specified
+
+MuPDF error: syntax error: no XObject subtype specified
+
+MuPDF error: syntax error: no XObject subtype specified
+
+MuPDF error: syntax error: no XObject subtype specified
+
+MuPDF error: syntax error: no XObject subtype specified
+
+MuPDF error: syntax error: no XObject subtype specified
+
+MuPDF error: syntax error: no XObject subtype specified
+
+MuPDF error: syntax error: no XObject subtype specified
+
+MuPDF error: format error: No default Layer config
+
+[telegram_jihana_pertuken_pdf] 475/769
+[telegram_jihana_pertuken_pdf] 500/769
+[telegram_jihana_pertuken_pdf] 525/769
+[telegram_jihana_pertuken_pdf] 550/769
+[telegram_jihana_pertuken_pdf] 575/769
+[telegram_jihana_pertuken_pdf] 600/769
+[telegram_jihana_pertuken_pdf] 625/769
+[telegram_jihana_pertuken_pdf] 650/769
+[telegram_jihana_pertuken_pdf] 675/769
+[telegram_jihana_pertuken_pdf] 700/769
+[telegram_jihana_pertuken_pdf] 725/769
+[telegram_jihana_pertuken_pdf] 750/769
+[telegram_jihana_pertuken_pdf] 769/769
+[telegram_pertok_badini] 157 .pdf files, 5 already done, 152 to process
+[telegram_pertok_badini] 25/152
+[telegram_pertok_badini] 50/152
+[telegram_pertok_badini] 75/152
+[telegram_pertok_badini] 100/152
+[telegram_pertok_badini] 125/152
+[telegram_pertok_badini] 150/152
+[telegram_pertok_badini] 152/152
+[sh2_unicodefixed_bahdini] 241 .txt files, 5 already done, 236 to process
+[sh2_unicodefixed_bahdini] 25/236
+[sh2_unicodefixed_bahdini] 50/236
+[sh2_unicodefixed_bahdini] 75/236
+[sh2_unicodefixed_bahdini] 100/236
+[sh2_unicodefixed_bahdini] 125/236
+[sh2_unicodefixed_bahdini] 150/236
+[sh2_unicodefixed_bahdini] 175/236
+[sh2_unicodefixed_bahdini] 200/236
+[sh2_unicodefixed_bahdini] 225/236
+[sh2_unicodefixed_bahdini] 236/236
+{
+  "telegram_badini_book": {
+    "documents": 993,
+    "by_status": {
+      "needs_ocr": 128,
+      "extracted": 791,
+      "extracted_suspect": 73,
+      "extracted_partial": 1
+    },
+    "extracted_chars": 145192419
+  },
+  "telegram_jihana_pertuken_pdf": {
+    "documents": 774,
+    "by_status": {
+      "extracted": 596,
+      "needs_ocr": 116,
+      "extracted_suspect": 59,
+      "extracted_partial": 2,
+      "error": 1
+    },
+    "extracted_chars": 111706649
+  },
+  "telegram_pertok_badini": {
+    "documents": 157,
+    "by_status": {
+      "extracted": 104,
+      "needs_ocr": 42,
+      "extracted_suspect": 10,
+      "extracted_partial": 1
+    },
+    "extracted_chars": 24872350
+  },
+  "sh2_unicodefixed_bahdini": {
+    "documents": 241,
+    "by_status": {
+      "extracted": 241
+    },
+    "extracted_chars": 6266370
+  }
+}
