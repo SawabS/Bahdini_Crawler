@@ -1,22 +1,30 @@
 # Bahdini Crawler
 
 Data collection for **Badini (Bahdini) Kurdish** LLM fine-tuning. This repo
-contains three collectors and the metadata of everything they harvested:
+contains three collectors, an extraction pipeline, and the metadata of
+everything they harvested:
 
-1. **Web crawler** ([crawler.py](crawler.py)): crawls six Badini websites,
-   maps their full page structure, and downloads every publicly linked
-   document (PDF, DOC/DOCX, XLS/XLSX, PPT/PPTX, ZIP and more).
-2. **Facebook group scraper**
-   ([AbdulrahmanBamarni_PartokxanaElectroni/](AbdulrahmanBamarni_PartokxanaElectroni/)):
-   a Playwright-based scraper for the "Partokxana Electroni" (Electronic
-   Library) Facebook group.
+1. **Web crawler** ([web/crawler.py](web/crawler.py)): crawls six Badini
+   websites, maps their full page structure, and downloads every publicly
+   linked document (PDF, DOC/DOCX, XLS/XLSX, PPT/PPTX, ZIP and more).
+2. **Facebook group scraper** ([facebook/](facebook/)): a Playwright-based
+   scraper for the "Partokxana Electroni" (Electronic Library) Facebook
+   group.
 3. **Telegram channel downloader** ([telegram/](telegram/)): a Telethon-based
    downloader that pulls every document attachment from three Badini book
    channels, and also follows links posted in messages (direct files, Google
    Drive, MediaFire, Dropbox).
+4. **Extraction pipeline**
+   ([scripts/extract_pipeline.py](scripts/extract_pipeline.py)): turns the
+   harvested PDFs plus manually supplied text drops
+   ([sources/](sources/)) into a normalized plain-text corpus under
+   [extractions/](extractions/), one folder per source, preprocessed with
+   [KLPT](https://github.com/sinaahmadi/klpt); scanned PDFs are flagged for
+   a future OCR / Google Document AI pass.
 
-The downloaded files themselves (~25 GB) are kept out of git; this repo holds
-the code, configuration, structure maps, manifests, and reports.
+The downloaded files themselves (~25 GB) and the extracted text are kept out
+of git; this repo holds the code, configuration, structure maps, manifests,
+and reports.
 
 ## Where to find what
 
@@ -24,11 +32,13 @@ the code, configuration, structure maps, manifests, and reports.
 |---|---|
 | See what was collected and the token estimate | [docs/CRAWL_REPORT.md](docs/CRAWL_REPORT.md) |
 | See what went wrong (blocked site, malware finding, rate limits) | [docs/BLOCKERS.md](docs/BLOCKERS.md) |
-| See the source sites, their robots.txt and sitemaps | [config/base_urls.md](config/base_urls.md) |
+| See the source sites, their robots.txt and sitemaps | [web/config/base_urls.md](web/config/base_urls.md) |
 | Browse a site's page structure | `crawls/<site>/site_structure.md` |
 | Look up a downloaded file's origin URL | `crawls/<site>/documents.csv` |
-| Check the Facebook scrape and its Badini/Arabic tagging | [AbdulrahmanBamarni_PartokxanaElectroni/](AbdulrahmanBamarni_PartokxanaElectroni/) (`pdf_table.md`, `manifest.json`) |
+| Check the Facebook scrape and its Badini/Arabic tagging | [facebook/](facebook/) (`pdf_table.md`, `manifest.json`) |
 | Look up a Telegram download's source message or link | `telegram/downloads/<channel>/.download_state.json` |
+| Use the extracted text corpus / see per-document quality stats | [extractions/README.md](extractions/README.md) |
+| See which PDFs need OCR (Document AI queue) | [extractions/needs_ocr.csv](extractions/needs_ocr.csv) |
 | Re-run or extend a crawl | [Quick start](#quick-start) below |
 
 ## Results at a glance
@@ -62,23 +72,43 @@ the code, configuration, structure maps, manifests, and reports.
 
 ## Repository layout
 
+Collectors are self-contained folders (code next to its config, state and
+credentials); cross-source processing lives in `scripts/`; harvested data
+and derived text sit in top-level output folders (`crawls/`, `extractions/`).
+
 ```
 Bahdini_Crawler/
 ├── README.md                  <- you are here
-├── crawler.py                 # web crawler entry point (site configs in SITES at the top)
 │
-├── config/
-│   ├── base_urls.md           # source sites, robots.txt and sitemap notes
-│   └── govarabadinan.xml      # locally supplied sitemap for the Blogspot source
+├── web/                       # web crawler
+│   ├── crawler.py             # entry point (site configs in SITES at the top)
+│   └── config/
+│       ├── base_urls.md       # source sites, robots.txt and sitemap notes
+│       └── govarabadinan.xml  # locally supplied sitemap for the Blogspot source
 │
-├── docs/
-│   ├── CRAWL_REPORT.md        # full crawl results + Badini token estimate
-│   └── BLOCKERS.md            # blockers and errors encountered
+├── facebook/                  # "Partokxana Electroni" group scrape (own README)
+│   ├── facebook_pdf_downloader.py  # Playwright scraper (login, scan, download)
+│   ├── pdf_table.md           # per-PDF list with is_bahdini / is_arabic tags
+│   ├── manifest.json          # per-post download log (makes runs resumable)
+│   ├── permalinks.json        # harvested group post IDs
+│   ├── legacy/                # superseded first version of the scraper
+│   └── pdfs/                  # downloaded PDFs (NOT in git, ~6 GB)
 │
-├── scripts/
+├── telegram/                  # Telegram channel downloader
+│   ├── download_telegram_documents.py  # Telethon downloader (attachments + posted links)
+│   ├── run_downloader.sh      # launcher (conda env, unbuffered output)
+│   ├── requirements.txt       # Telethon, cryptg, aiohttp
+│   ├── .telegram/             # login session (NOT in git, private)
+│   └── downloads/             # one folder per channel
+│       ├── <channel>/         # downloaded books (NOT in git, ~12 GB)
+│       └── <channel>/.download_state.json  # manifest: message ids, sizes, link outcomes
+│
+├── sources/                   # manually supplied raw text drops
+│   └── sh2_unicodefixed/      # 241 Bahdini .txt files (unicode-fixed)
+│
+├── scripts/                   # cross-source processing
+│   ├── extract_pipeline.py    # PDFs/raw text -> normalized corpus in extractions/
 │   └── token_estimate.py      # PDF sampling + Kurdish text classification
-│
-├── logs/                      # raw session logs of each crawl run
 │
 ├── crawls/                    # web crawler output, one folder per site
 │   ├── crawl_summary.json     # machine-readable per-site summary
@@ -90,22 +120,17 @@ Bahdini_Crawler/
 │       ├── site_structure.md  # hierarchical page tree
 │       └── errors.log         # per-URL failures
 │
-├── AbdulrahmanBamarni_PartokxanaElectroni/   # Facebook group scrape (own README)
-│   ├── facebook_pdf_downloader.py  # Playwright scraper (login, scan, download)
-│   ├── pdf_table.md           # per-PDF list with is_bahdini / is_arabic tags
-│   ├── manifest.json          # per-post download log (makes runs resumable)
-│   ├── permalinks.json        # harvested group post IDs
-│   ├── legacy/                # superseded first version of the scraper
-│   └── pdfs/                  # downloaded PDFs (NOT in git, ~6 GB)
+├── extractions/               # normalized text corpus, one folder per source (own README)
+│   ├── <source>/_manifest.jsonl  # per-document status + quality stats
+│   ├── <source>/*.txt         # extracted text (NOT in git, regenerate via the pipeline)
+│   ├── extraction_summary.json
+│   └── needs_ocr.csv          # scanned PDFs for a future Document AI pass
 │
-└── telegram/                  # Telegram channel downloader
-    ├── download_telegram_documents.py  # Telethon downloader (attachments + posted links)
-    ├── run_downloader.sh      # launcher (conda env, unbuffered output)
-    ├── requirements.txt       # Telethon, cryptg, aiohttp
-    ├── .telegram/             # login session (NOT in git, private)
-    └── downloads/             # one folder per channel
-        ├── <channel>/         # downloaded books (NOT in git, ~12 GB)
-        └── <channel>/.download_state.json  # manifest: message ids, sizes, link outcomes
+├── docs/
+│   ├── CRAWL_REPORT.md        # full crawl results + Badini token estimate
+│   └── BLOCKERS.md            # blockers and errors encountered
+│
+└── logs/                      # raw session logs of crawl / extraction runs
 ```
 
 ## Quick start
@@ -115,11 +140,11 @@ Bahdini_Crawler/
 Requires Python 3.10+ with `requests`, `beautifulsoup4`, `lxml`.
 
 ```bash
-python3 crawler.py                  # crawl every configured site
-python3 crawler.py zcks uod         # crawl selected sites only
+python3 web/crawler.py              # crawl every configured site
+python3 web/crawler.py zcks uod     # crawl selected sites only
 ```
 
-Each site is one dict in the `SITES` list in [crawler.py](crawler.py) with
+Each site is one dict in the `SITES` list in [web/crawler.py](web/crawler.py) with
 optional overrides (`delay`, `workers`, `max_pages`, `sitemaps`,
 `extra_seeds`, `force_http`). Adding a new source means adding one entry.
 
@@ -136,10 +161,22 @@ Requires `pdftotext` (poppler-utils).
 python3 scripts/token_estimate.py
 ```
 
+### Extraction pipeline
+
+Requires a conda env with `pymupdf` and `klpt`
+(`conda run -n ai pip install pymupdf klpt`):
+
+```bash
+conda run --no-capture-output -n ai python -u scripts/extract_pipeline.py
+```
+
+Incremental: only documents whose output text is missing are processed.
+See [extractions/README.md](extractions/README.md) for the output layout,
+per-document statuses, and the needs-OCR queue.
+
 ### Facebook scraper
 
-See the dedicated
-[README](AbdulrahmanBamarni_PartokxanaElectroni/README.md)
+See the dedicated [README](facebook/README.md)
 (needs Playwright and a Facebook account that is a member of the group).
 
 ### Telegram downloader

@@ -36,7 +36,7 @@ Requires the `ai` conda environment (already has `playwright 1.61`,
 `requests`, `tqdm`, and the Chromium browser installed).
 
 ```bash
-cd "/home/sawab/AI - Project/KI_finetuning/data/Bahdini_Crawler/AbdulrahmanBamarni_PartokxanaElectroni"
+cd facebook   # from the repo root
 conda run -n ai --live-stream python facebook_pdf_downloader.py
 ```
 

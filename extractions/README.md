@@ -9,7 +9,7 @@ per input document:
 | `telegram_badini_book/` | telegram/downloads/Badini_book | 993 PDFs |
 | `telegram_jihana_pertuken_pdf/` | telegram/downloads/jihana_pertuken_pdf | 774 PDFs |
 | `telegram_pertok_badini/` | telegram/downloads/pertok_badini | 157 PDFs |
-| `sh2_unicodefixed_bahdini/` | Sh2_UnicodeFixed_Bahdini | 241 txt |
+| `sh2_unicodefixed_bahdini/` | sources/sh2_unicodefixed | 241 txt |
 
 Text is extracted with PyMuPDF (embedded text layer only, no OCR), then
 NFKC-folded and normalized with [KLPT](https://github.com/sinaahmadi/klpt)

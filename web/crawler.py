@@ -37,7 +37,10 @@ from urllib.parse import urljoin, urlparse, urlunparse, parse_qsl, urlencode, un
 import requests
 from bs4 import BeautifulSoup
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
+# this file lives in web/; its config sits alongside it, crawl output
+# stays at the repo root in crawls/
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
 OUT_ROOT = os.path.join(ROOT, "crawls")
 
 # NOTE: a UA containing a crawler token made journal.uod.ac serve cloaked
@@ -111,7 +114,7 @@ SITES = [
         "base": "https://govarabadinan.blogspot.com/",
         "domains": {"govarabadinan.blogspot.com"},
         "sitemaps": ["https://govarabadinan.blogspot.com/sitemap.xml"],
-        "local_sitemaps": [os.path.join(ROOT, "config", "govarabadinan.xml")],
+        "local_sitemaps": [os.path.join(HERE, "config", "govarabadinan.xml")],
     },
     {
         "name": "zcks",

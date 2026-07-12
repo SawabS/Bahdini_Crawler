@@ -37,7 +37,7 @@ SOURCES = {
     "telegram_badini_book": (ROOT / "telegram/downloads/Badini_book", "pdf"),
     "telegram_jihana_pertuken_pdf": (ROOT / "telegram/downloads/jihana_pertuken_pdf", "pdf"),
     "telegram_pertok_badini": (ROOT / "telegram/downloads/pertok_badini", "pdf"),
-    "sh2_unicodefixed_bahdini": (ROOT / "Sh2_UnicodeFixed_Bahdini", "txt"),
+    "sh2_unicodefixed_bahdini": (ROOT / "sources/sh2_unicodefixed", "txt"),
 }
 
 # below this many extracted chars per page the text layer is junk -> OCR

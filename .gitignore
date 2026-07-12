@@ -2,10 +2,10 @@
 crawls/*/documents/
 
 # Facebook group scrape: PDFs too large for git (~6 GB)
-AbdulrahmanBamarni_PartokxanaElectroni/pdfs/
+facebook/pdfs/
 # Facebook session cookies: never commit
-AbdulrahmanBamarni_PartokxanaElectroni/.fb_profile/
-AbdulrahmanBamarni_PartokxanaElectroni/.vscode/
+facebook/.fb_profile/
+facebook/.vscode/
 
 # Telegram channel downloads: books too large for git (~12 GB);
 # the .download_state.json manifests stay tracked
