@@ -1,402 +1,363 @@
-# Google Document AI OCR Guide
+# OCR Guide: Scanned PDFs to Bahdini Corpus
 
-This guide takes a new contributor from no Google Cloud setup to a verified,
-repeatable batch OCR workflow for the scanned PDFs in this repository. It is
-also intended to be given to an implementation agent as the operational
-contract for the Document AI integration.
+**This document is the single source of truth for OCR in this repository.**
+It takes a new contributor (or an implementation agent) from zero Google
+Cloud setup to a reviewed Bahdini text corpus, end to end.
 
-The native extraction stage is deliberately separate from OCR:
+> **Decision record (2026-07-15).** This guide originally described a Google
+> Document AI batch workflow. After a side-by-side pilot, the project
+> **diverged to Gemini visual transcription through Vertex AI** as the
+> production OCR path. Document AI remains only as a retired reference in
+> [Appendix A](#appendix-a-document-ai-retired-path). Everything else in this
+> guide describes the Gemini pipeline in
+> [`gemini_ocr_pipeline/`](../gemini_ocr_pipeline/).
 
-```text
-raw PDFs -> scripts/extract_pipeline.py -> extractions/needs_ocr.csv
-                                           -> Document AI batch OCR
-                                           -> normalized text + manifest results
-```
+## Why the project diverged to Gemini
 
-Do not OCR every PDF automatically. The native extraction pipeline is much
-faster and avoids cloud cost for files that already contain a usable text
-layer. The OCR input queue is [extractions/needs_ocr.csv](../extractions/needs_ocr.csv).
+An A/B comparison (pages 3–13 of a legacy Facebook scan, plus later smoke
+tests; runner: [`scripts/compare_document_ai_gemini.py`](../scripts/compare_document_ai_gemini.py))
+found:
 
-## 1. Decide the Cloud Design First
-
-Write down these values before creating resources. Keep them consistent
-throughout the workflow.
-
-| Setting | Recommended value | Why it matters |
+| Criterion | Document AI Enterprise OCR | Gemini `gemini-3.1-flash-lite` (Vertex) |
 |---|---|---|
-| Google Cloud project | your dedicated data/OCR project | Billing, API enablement, IAM, processor ownership |
-| Processor type | Enterprise Document OCR | General OCR for scanned PDFs; preserves structural output in Document AI JSON |
-| Processor location | `us`, unless EU-only residency is required | A processor cannot be moved later; endpoint and storage location must match |
-| Input bucket location | same region/multi-region as processor | Avoids location incompatibilities and unnecessary transfer |
-| Output bucket location | same as input and processor | Document AI writes JSON results here |
-| Authentication for development | Application Default Credentials (ADC) | The Python client discovers these automatically |
-| Processing mode | Cloud Storage batch processing | Appropriate for thousands of PDFs and resumable output |
+| Bahdini character fidelity | Dropped Kurdish distinctions, word splitting, substitutions | Visibly better; remaining ڤ/ق confusions fixed by prompt `v4` |
+| Corrupted legacy text layers | Must disable native parsing | Irrelevant: pages are sent as images only |
+| Language filtering | None; transcribes everything | Prompt gate refuses non-Badini pages, then skips the document |
+| Cost per page | $0.00150 flat | ≈ $0.0009–0.0015 per transcribed page; near zero for gated non-Badini books |
+| Whole-queue estimate (201k pages) | ≈ $302 | ≤ $181, lower in practice because non-Badini books exit early |
 
-For a project named `bahdini-data` in the US, the identifiers used below are:
+Two standing technical rules came out of that evaluation:
 
-```bash
-export PROJECT_ID="bahdini-data"
-export LOCATION="us"
-export RAW_BUCKET="bahdini-documentai-raw"
-export OUTPUT_BUCKET="bahdini-documentai-output"
+1. **Never send a PDF to a model.** Many legacy PDFs carry malformed embedded
+   text layers; a model that reads native PDF text inherits the corruption.
+   Always render pages to images first. The pipeline does this for you.
+2. **OCR output is never automatically training data.** Everything lands in
+   an `_unreviewed` area and requires human review before promotion.
+
+## Architecture
+
+```text
+raw PDFs (crawls/…)
+   |
+   |  scripts/extract_pipeline.py            (native text layer, no OCR)
+   v
+extractions/<source>/_manifest.jsonl         rows with status="needs_ocr"
+   |
+   |  gemini_ocr_pipeline/build_manifest.py  (Stage A)
+   v
+gemini_ocr_pipeline/output/manifest.jsonl    work queue: 1 row per PDF
+   |
+   |  gemini_ocr_pipeline/run_ocr.py         (Stage B)
+   |    page -> grayscale PNG (~288 DPI) -> Gemini via Vertex AI
+   v
+gemini_ocr_pipeline/output/pages/<source>/<doc_id>.jsonl   1 record per page
+   |
+   |  gemini_ocr_pipeline/compile_corpus.py  (Stage C)
+   v
+gemini_ocr_pipeline/output/corpus_unreviewed/              per-doc .txt,
+   |                                          corpus.jsonl, report.md,
+   |                                          pretrain_candidate_unreviewed.txt
+   |
+   |  HUMAN REVIEW                            (Stage D, mandatory)
+   v
+training corpus (LoRA fine-tuning / pre-training)
 ```
 
-Use new, globally unique bucket names if these are already taken. Do not put
-service-account keys, OAuth tokens, credentials files, or processor secrets in
-the repository. User ADC is stored outside the repository at
-`~/.config/gcloud/application_default_credentials.json`.
+Do not OCR every PDF. The native extraction pipeline is faster and free for
+files with a usable text layer; only documents it flags `needs_ocr` enter
+this pipeline. `gemini_ocr_pipeline/output/` is Git-ignored and fully
+regenerable except for the Gemini responses themselves, which cost money —
+treat `output/pages/` as the valuable artifact and back it up before bulk
+deleting anything.
 
-## 2. Prerequisites and Permissions
+## 1. One-time cloud setup (A to Z)
 
-You need a Google account that can use the target project, and billing must be
-enabled for that project. A project owner can perform the whole setup. In a
-shared project, ask an administrator to grant the least privilege needed.
+Identifiers used throughout (already provisioned for this project):
 
-| Who | Minimum capability / common role | Purpose |
+| Setting | Value |
+|---|---|
+| Google Cloud project | `bahdini-data` (project number `377090410782`) |
+| API | `aiplatform.googleapis.com` (Vertex AI) |
+| Model | `gemini-3.1-flash-lite`, called with `vertexai=True`, `location="global"` |
+| Authentication | Application Default Credentials (ADC) |
+| Conda environment | `ai` (never create a project-local venv) |
+| Buckets / processors | **None needed** for the Gemini path |
+
+Steps, in order. Skip any step that is already verified.
+
+1. **Install and authenticate the gcloud CLI.**
+
+   ```bash
+   gcloud auth login
+   gcloud config set project bahdini-data
+   gcloud config list --format='text(core.project,core.account)'
+   ```
+
+2. **Confirm billing and set a budget alert before any large run.**
+
+   ```bash
+   gcloud billing projects describe bahdini-data \
+     --format='yaml(billingAccountName,billingEnabled)'
+   ```
+
+   Then create a budget with alerts (for example $50) in Console → Billing →
+   Budgets & alerts. Vertex AI calls to Google-owned Gemini models are
+   expected to be eligible for the $300 Google Cloud welcome credit; the
+   AI Studio Gemini API is **not**. Verify in Billing → Reports after the
+   pilot that usage is actually drawing from the credit.
+
+3. **Enable the Vertex AI API.**
+
+   ```bash
+   gcloud services enable aiplatform.googleapis.com --project=bahdini-data
+   gcloud services list --enabled --project=bahdini-data \
+     --filter='config.name=aiplatform.googleapis.com' \
+     --format='value(config.name)'
+   ```
+
+4. **Create Application Default Credentials.**
+
+   ```bash
+   gcloud auth application-default login
+   gcloud auth application-default print-access-token >/dev/null && echo "ADC is valid"
+   ```
+
+   Credentials are stored outside the repository at
+   `~/.config/gcloud/application_default_credentials.json`. Never commit
+   credentials. If a local browser cannot complete the login, run
+   `gcloud auth application-default login --no-browser`, run the printed
+   `--remote-bootstrap` command on a browser-capable machine, and paste the
+   authorization **response** (not the URL) back into the first terminal.
+
+5. **Install the Python dependencies in the `ai` environment.**
+
+   ```bash
+   conda activate ai
+   python -m pip install --upgrade google-genai pymupdf
+   ```
+
+6. **Verify the whole chain with one tiny call.**
+
+   ```bash
+   conda run --no-capture-output -n ai python - <<'PY'
+   from google import genai
+   client = genai.Client(vertexai=True, project="bahdini-data", location="global")
+   r = client.models.generate_content(model="gemini-3.1-flash-lite", contents="ping")
+   print("Vertex AI OK:", r.text[:40])
+   PY
+   ```
+
+   This exercises ADC, API enablement, project selection, and model access at
+   once. If it fails, see the [troubleshooting map](#7-troubleshooting-map).
+
+## 2. Configuration and provenance rules
+
+All knobs live in [`gemini_ocr_pipeline/ocr_config.py`](../gemini_ocr_pipeline/ocr_config.py):
+model, Vertex project/location, rendering resolution (≈288 DPI grayscale,
+long side capped at 3400 px), pricing constants, and the transcription
+prompt.
+
+The prompt is **versioned** (`PROMPT_VERSION`, currently `v4`) and every page
+record stores the version that produced it. Rules:
+
+- Any change to the prompt, model, or rendering that can affect output
+  **must** bump `PROMPT_VERSION`.
+- `v3` introduced the language gate: the model answers
+  `[NOT_BADINI: <language>]` instead of transcribing pages whose body text is
+  Arabic, Sorani, Latin-script Kurmanji, Persian, Turkish, or English.
+- `v4` added the confusable-letter dot-count rule after a smoke test showed
+  systematic ڤ→ق substitutions; on the test page it moved counts from
+  ڤ=8/ق=10 to ڤ=18/ق=1 with the single remaining ق being genuinely correct.
+- The pricing constants ($0.30 / $1.35 per million input/output tokens)
+  reproduce the pilot's measured cost but are **estimates** — verify against
+  the current Vertex AI price list before trusting absolute dollar numbers.
+
+## 3. Stage A — Build the work queue
+
+```bash
+conda run --no-capture-output -n ai python gemini_ocr_pipeline/build_manifest.py
+```
+
+Reads every `extractions/<source>/_manifest.jsonl`, keeps rows with
+`status="needs_ocr"` whose PDF still exists on disk, and writes
+`gemini_ocr_pipeline/output/manifest.jsonl` (one row per document with
+source, relative path, stable `doc_id`, page and byte counts). Missing files
+are counted and reported, not fatal — sources with incomplete downloads
+(for example `pertokenbadini`) simply queue what exists.
+
+Re-run Stage A whenever new downloads finish or the extraction pipeline is
+re-run. It is cheap and idempotent. Queue at the time of writing: **2,869
+documents / 201,327 pages** (spirez ≈ 65% of documents).
+
+## 4. Stage B — Run OCR
+
+The runner is resumable and safe to interrupt at any point: every finished
+page is already on disk, and a re-run resumes exactly where it stopped.
+
+```bash
+# pilot: a bounded number of pages
+conda run --no-capture-output -n ai python -u gemini_ocr_pipeline/run_ocr.py \
+  --source zcks --max-pages 50 --workers 2
+
+# production, per source
+conda run --no-capture-output -n ai python -u gemini_ocr_pipeline/run_ocr.py \
+  --source spirez --workers 4
+```
+
+| Flag | Meaning |
+|---|---|
+| `--source SRC` | limit to one source (repeatable) |
+| `--doc SUBSTRING` | only documents whose path contains the substring |
+| `--max-docs N` | stop after N documents |
+| `--max-pages N` | global page budget for this run (use for pilots) |
+| `--workers N` | concurrent Gemini requests (default 2) |
+| `--skip-after N` | language gate: skip the rest of a document after N consecutive non-Badini pages (default 5; 0 disables) |
+| `--ignore-doc-skips` | re-attempt documents previously skipped as non-Badini |
+| `--keep-images` | keep rendered PNGs under `output/images/<doc_id>/` |
+| `--dry-run` | render and record pages without calling Gemini |
+
+Every page attempt appends one JSONL record to
+`output/pages/<source>/<doc_id>.jsonl` containing the model, prompt version,
+image SHA-256 and pixel size, finish reason, token usage, estimated cost,
+timestamp, status, and the raw transcription. Page statuses:
+
+| Status | Meaning | Retried on re-run? |
 |---|---|---|
-| Person enabling APIs | `serviceusage.services.enable` / `roles/serviceusage.serviceUsageAdmin` | Enable the Document AI API |
-| Person creating or managing a processor | Document AI processor administration permission, commonly `roles/documentai.editor` | Create and inspect processors |
-| Person creating buckets and uploading inputs | Storage bucket administration, commonly `roles/storage.admin` | Create buckets and copy local PDFs |
-| Runtime principal reading input objects | `roles/storage.objectViewer` on the input bucket | Let Document AI read batch inputs |
-| Runtime principal writing result objects | `roles/storage.objectCreator` on the output bucket | Let Document AI write batch JSON |
-| Local developer running Python | Access to use the processor and read/write the relevant buckets | Submit and retrieve OCR work |
+| `ok` | transcription received | no |
+| `no_text` | model answered `[NO_TEXT]` (cover, pure image) | no |
+| `blank` | page image was blank; Gemini never called | no |
+| `not_badini` | model answered `[NOT_BADINI: <language>]` | no |
+| `empty` | empty response (for example token-limit cutoff) | yes |
+| `error` | exception after 5 retries with backoff | yes |
+| `dry_run` | rendered only | yes |
+| `doc_skipped` | record with `page: 0`; the language gate abandoned the document | only with `--ignore-doc-skips` |
 
-Roles can be granted at a narrower bucket or processor scope where the
-organization permits it. Avoid broad project-wide admin access just to run a
-batch.
+The language gate is the main cost control: a non-Badini book costs a handful
+of gated pages (a few output tokens each) instead of a full transcription.
+Verified example: a 1,002-page Arabic novel cost $0.0024 total. Blank and
+`no_text` pages are neutral — they neither extend nor break a non-Badini run,
+so an Arabic book with an ornamental cover is still caught.
 
-### Cross-project bucket access
-
-If the processor and a storage bucket are in different projects, grant the
-Document AI service agent from the **processor project** access to the bucket
-project. Obtain the processor project's number:
-
-```bash
-gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)'
-```
-
-The Document AI service agent address is:
-
-```text
-service-PROJECT_NUMBER@gcp-sa-documentai.iam.gserviceaccount.com
-```
-
-Grant it `roles/storage.objectViewer` on the input bucket and
-`roles/storage.objectCreator` on the output bucket. For example:
+## 5. Stage C — Compile the corpus
 
 ```bash
-export PROJECT_NUMBER="YOUR_PROJECT_NUMBER"
-export DOCUMENT_AI_AGENT="service-${PROJECT_NUMBER}@gcp-sa-documentai.iam.gserviceaccount.com"
-
-gcloud storage buckets add-iam-policy-binding "gs://${RAW_BUCKET}" \
-  --member="serviceAccount:${DOCUMENT_AI_AGENT}" \
-  --role="roles/storage.objectViewer"
-
-gcloud storage buckets add-iam-policy-binding "gs://${OUTPUT_BUCKET}" \
-  --member="serviceAccount:${DOCUMENT_AI_AGENT}" \
-  --role="roles/storage.objectCreator"
+conda run --no-capture-output -n ai python gemini_ocr_pipeline/compile_corpus.py
 ```
 
-Keep this step even when access appears to work initially: batch processing
-fails later with a storage permission error if the service agent cannot read
-the inputs or write the results.
+Assembles all page records into `output/corpus_unreviewed/`:
 
-## 3. Install and Verify the Google Cloud CLI
+- `<source>/<document>.txt` — pages joined with `\n\f\n` (same separator as
+  the native extraction corpus), normalized with the same NFKC + KLPT rules
+  as `extract_pipeline.py` so both corpora can be mixed (`--no-normalize` to
+  keep raw Gemini output; note KLPT also folds Arabic-Indic digits like ١١٤
+  to 114).
+- `corpus.jsonl` — one record per document: page counts by status,
+  completeness, character count, `[unclear]` count, Arabic-script and
+  Kurdish-letter ratios, estimated cost, `review_status: "unreviewed"`, and a
+  classification: `kurdish`, `not_badini`, `arabic_not_kurdish`, `low_text`,
+  or `not_arabic_script`.
+- `report.md` — per-source totals plus a "review first" list (non-Kurdish
+  classifications, heavy `[unclear]` use, incomplete documents).
+- `pretrain_candidate_unreviewed.txt` — concatenation of complete,
+  Kurdish-classified documents.
 
-Install the Google Cloud CLI using the official installation instructions for
-your operating system. Then authenticate the CLI and select the intended
-project:
+Stage C is a pure local re-aggregation: re-run it as often as you like, it
+never calls the API.
 
-```bash
-gcloud auth login
-gcloud config set project "$PROJECT_ID"
-gcloud config list --format='text(core.project,core.account)'
-gcloud --version
-```
+## 6. Stage D — Human review and promotion (mandatory)
 
-The last two commands should show the expected project, user account, and a
-recent Google Cloud SDK version.
+Classification prioritizes review; it never replaces it. Before any text is
+used for training:
 
-### Browser authentication problems on Linux
+1. Read `report.md`; resolve every "review first" entry (re-run failed pages,
+   confirm `not_badini` skips by spot-checking one page image with
+   `--keep-images`, decide what to do with `low_text` fragments).
+2. Sample transcribed pages against the source PDF — render the page and
+   compare. Check specifically: Kurdish letters `ێ ۆ ڕ ڵ ڤ پ چ ژ گ ە`,
+   reading order across columns, poetry line breaks, and that the model did
+   not paraphrase or "repair" anything.
+3. Only after review, copy or reference the accepted `.txt` files into the
+   training candidate set. For LoRA fine-tuning, build instruction pairs from
+   the reviewed per-document files; for pre-training, use the reviewed
+   concatenated file.
+4. Record what was accepted (a simple reviewed-list file next to the corpus
+   is enough) so a later compile re-run cannot silently change the training
+   set.
 
-`gcloud auth application-default login` launches a browser by default. GTK,
-Wayland, Vulkan, theme, or NSS certificate warnings can be noisy. They are not
-the success criterion. Authentication is complete only when the command ends
-with:
-
-```text
-Credentials saved to file: [.../application_default_credentials.json]
-```
-
-If the browser opens but consent fails, retry and explicitly approve the
-Google consent page with the `cloud-platform` scope. If a local browser cannot
-complete the login, use the remote bootstrap flow correctly:
-
-1. Run `gcloud auth application-default login --no-browser` on the development
-   machine.
-2. Copy the **entire command** that it prints, including `--remote-bootstrap`.
-3. Run that printed command on a different machine that has a working browser
-   and a compatible `gcloud` version.
-4. Complete consent there.
-5. Copy the authorization response printed by that second command back into
-   the original terminal prompt.
-
-Do not paste the original authorization URL into the response prompt. It is
-not an authorization response and produces the error that `state` and `code`
-query parameters are missing.
-
-## 4. Enable the API and Create the Processor
-
-Enable the API from either the console or CLI:
-
-```bash
-gcloud services enable documentai.googleapis.com --project="$PROJECT_ID"
-gcloud services list --enabled --project="$PROJECT_ID" \
-  --filter='config.name=documentai.googleapis.com' \
-  --format='value(config.name)'
-```
-
-The last command must print `documentai.googleapis.com`.
-
-Create the processor in the Google Cloud Console:
-
-1. Open **Google Cloud Console** and select the intended project.
-2. Open **Document AI** from the navigation menu or search box.
-3. Select **Processors** and choose **Create Processor**.
-4. Choose **Enterprise Document OCR**.
-5. Give it an unambiguous name such as `bahdini-enterprise-ocr`.
-6. Select `us` or `eu`, matching the location decision from step 1.
-7. Create it and copy the numeric processor ID shown on its details page.
-
-Set that ID for the remaining commands:
-
-```bash
-export PROCESSOR_ID="YOUR_NUMERIC_PROCESSOR_ID"
-export PROCESSOR_NAME="projects/${PROJECT_ID}/locations/${LOCATION}/processors/${PROCESSOR_ID}"
-```
-
-There is not always a `gcloud documentai` command group installed, so a missing
-`gcloud documentai` command does **not** indicate an API failure. Use the
-console or the Python check below to inspect processors.
-
-## 5. Set Up Application Default Credentials and Python
-
-The repository uses the Conda environment named `ai`. Do not create a
-project-local virtual environment for this workflow.
-
-```bash
-conda activate ai
-gcloud auth application-default login
-gcloud auth application-default print-access-token >/dev/null && echo "ADC is valid"
-python -m pip install --upgrade google-cloud-documentai
-python -c 'from google.cloud import documentai; print(documentai.__file__)'
-```
-
-ADC is for local development. A deployed job should normally use the runtime
-environment's attached service account or Workload Identity, not a copied
-user credential file.
-
-### Verify the processor with the Python client
-
-This check verifies four common failure points at once: ADC, API enablement,
-the processor ID, and the required location-specific endpoint.
-
-```bash
-conda run --no-capture-output -n ai python - <<'PY'
-import os
-from google.cloud import documentai
-
-project_id = os.environ["PROJECT_ID"]
-location = os.environ["LOCATION"]
-processor_id = os.environ["PROCESSOR_ID"]
-
-client = documentai.DocumentProcessorServiceClient(
-    client_options={"api_endpoint": f"{location}-documentai.googleapis.com"}
-)
-processor = client.get_processor(
-    name=f"projects/{project_id}/locations/{location}/processors/{processor_id}"
-)
-print({
-    "name": processor.name,
-    "display_name": processor.display_name,
-    "type": processor.type_,
-    "state": processor.state.name,
-})
-PY
-```
-
-For `us`, the host must be `us-documentai.googleapis.com`; for `eu`, it must
-be `eu-documentai.googleapis.com`. Using the default endpoint with an EU
-processor is a common source of confusing `NOT_FOUND` errors.
-
-## 6. Create Storage for Batch OCR
-
-Document AI batch processing reads from Cloud Storage and writes structured
-Document AI JSON files to Cloud Storage. Use distinct input and output
-buckets, keep uniform bucket-level access enabled, and keep both in the same
-location as the processor.
-
-```bash
-gcloud storage buckets create "gs://${RAW_BUCKET}" \
-  --project="$PROJECT_ID" \
-  --location="$LOCATION" \
-  --uniform-bucket-level-access
-
-gcloud storage buckets create "gs://${OUTPUT_BUCKET}" \
-  --project="$PROJECT_ID" \
-  --location="$LOCATION" \
-  --uniform-bucket-level-access
-
-gcloud storage buckets list --project="$PROJECT_ID" --format='value(name,location)'
-```
-
-For a cost-controlled trial, upload one small, representative PDF first. Do
-not start with the whole corpus.
-
-```bash
-mkdir -p /tmp/document-ai-trial
-cp "PATH/TO/ONE/SCANNED.pdf" /tmp/document-ai-trial/input.pdf
-gcloud storage cp /tmp/document-ai-trial/input.pdf "gs://${RAW_BUCKET}/trial/input.pdf"
-gcloud storage ls "gs://${RAW_BUCKET}/trial/"
-```
-
-Use stable prefixes for later batches:
-
-```text
-gs://RAW_BUCKET/batches/2026-07-15/batch-0001/
-gs://OUTPUT_BUCKET/batches/2026-07-15/batch-0001/
-```
-
-Never reuse an output prefix for a different submission. A unique prefix makes
-it possible to identify outputs, retry a failed batch safely, and retain an
-audit trail.
-
-## 7. Run Batch OCR Safely
-
-The correct unit of work is a tracked batch, not an unbounded upload. Build a
-batch manifest from [extractions/needs_ocr.csv](../extractions/needs_ocr.csv)
-that preserves at least:
-
-```text
-source, original relative path, original file name, input GCS URI,
-output GCS prefix, processor name, submission time, operation name,
-completion time, status, error, result JSON URI, normalized text path
-```
-
-Before implementing the full 2,869-PDF run, complete this progression:
-
-1. Submit one known scanned PDF and inspect the output JSON and extracted text.
-2. Submit a small mixed-source pilot batch, such as 5 to 20 documents.
-3. Review Badini character quality, reading order, page counts, and cost.
-4. Choose a bounded production batch size based on the service limits and
-   observed document sizes.
-5. Run production batches sequentially or with deliberately limited
-   concurrency, recording every operation and retry.
-
-### Required batch runner behavior
-
-An implementation agent should add a script such as
-`scripts/document_ai_batch_ocr.py`. The script must:
-
-- accept `--project`, `--location`, `--processor-id`, `--input-prefix`, and
-  `--output-prefix`, with environment-variable defaults;
-- read its candidate inputs from `extractions/needs_ocr.csv` or a generated
-  batch manifest, never recursively process arbitrary local files by default;
-- upload only the explicitly selected batch and preserve the original source
-  path in its manifest;
-- call `DocumentProcessorServiceClient.batch_process_documents` using the
-  `LOCATION-documentai.googleapis.com` endpoint;
-- poll the long-running operation until success or failure and record the
-  operation name before waiting;
-- download the Document AI JSON outputs, reconstruct text through each page's
-  text anchors, and write UTF-8 text files;
-- run the same NFKC and KLPT normalization rules as
-  [scripts/extract_pipeline.py](../scripts/extract_pipeline.py);
-- write one JSONL manifest record per original document, including failures;
-- be resumable and idempotent: an already successful document is skipped,
-  while failed documents can be selected for a controlled retry;
-- default to `--dry-run` unless an explicit submit flag is supplied;
-- never delete input PDFs, source manifests, or Cloud Storage results.
-
-Document AI batch output is structured JSON, not a plain text file. Preserve
-the raw JSON even after extracting text: it contains page geometry, confidence
-information, and text anchors needed for future diagnosis.
-
-### Text-anchor reconstruction rule
-
-Document AI stores full document text in `document.text`. Layout elements
-reference character intervals in that text. To reconstruct anchored text, join
-every `segment.start_index:segment.end_index` slice from the relevant
-`text_anchor.text_segments`; treat a missing `start_index` as zero. Do not
-assume there is only one segment.
-
-Keep page separators in the final text, for example `\n\f\n`, to match the
-existing native extraction pipeline and preserve page boundaries for review.
-
-## 8. Integrate and Validate Outputs
-
-OCR output is a candidate corpus, not automatically training-ready text. After
-each batch:
-
-1. Retain raw result JSON in an auditable location.
-2. Normalize the reconstructed text with the existing pipeline rules.
-3. Put results under a source-specific OCR output directory rather than
-   overwriting native extraction outputs.
-4. Record the processor, processor version if available, location, input hash,
-   and operation name in the manifest.
-5. Run language and quality classification before moving text into the training
-   candidate set.
-6. Sample pages visually against the original PDF, especially for ligatures,
-   punctuation, tables, multi-column documents, and Arabic-script reading
-   order.
-
-Useful acceptance checks for the pilot batch:
+Acceptance checks for a pilot batch:
 
 | Check | Expected outcome |
 |---|---|
-| Request succeeds | Batch operation reaches success and result JSON exists |
-| Page count | OCR page count agrees with PDF page count, allowing documented exceptions |
-| Text quality | Kurdish characters such as `ێ`, `ۆ`, `ڕ`, `ڵ`, `ڤ`, `پ`, `چ`, `ژ`, `گ`, `ە` survive correctly |
+| Kurdish character fidelity | ڤ/ق, پ/ب, چ/ج, گ/ک, ژ/ز, ێ/ی, ۆ/و all correct in samples |
 | Reading order | Sampled paragraphs follow the visible page order |
-| Provenance | Every output maps to one original local path and one GCS input URI |
-| Re-run safety | Re-running the same manifest does not submit completed documents again |
-| Failure visibility | Errors are stored as manifest records, not silently omitted |
+| No hallucination | Nothing in the transcript that is not on the page; `[unclear]` used instead of guesses |
+| Language gate precision | Spot-checked `not_badini` pages really are non-Badini |
+| Provenance | Every output maps to one source PDF, page, prompt version, and image hash |
+| Re-run safety | Re-running the same command submits no completed page again |
+| Failure visibility | Errors exist as page records, not silent gaps |
 
-## 9. Troubleshooting Map
+## 7. Troubleshooting map
 
 | Symptom | Likely cause | Resolution |
 |---|---|---|
-| `DefaultCredentialsError` | ADC absent or wrong user | Run `gcloud auth application-default login`, then test with `print-access-token` |
-| API disabled error | Document AI API disabled in the resource project | Enable `documentai.googleapis.com` in the correct project |
-| `NOT_FOUND` for a known processor | Wrong project, processor ID, or endpoint location | Verify the processor name and use `us-` or `eu-documentai.googleapis.com` |
-| Browser login says `cloud-platform` was not consented | Consent was cancelled or incomplete | Re-run login and approve the requested scope |
-| `--no-browser` says authorization response is invalid | The original URL was pasted instead of the remote-bootstrap output | Run the printed remote-bootstrap command on another browser-capable machine and paste its final response |
-| Batch fails reading `gs://` input | Document AI service agent lacks input access | Grant it `roles/storage.objectViewer` on the input bucket |
-| Batch fails writing output | Service agent lacks output access or prefix is invalid | Grant `roles/storage.objectCreator`; use a new valid `gs://.../prefix/` |
-| Bucket/processor location error | US/EU mismatch | Create/use buckets in the processor's location; do not mix `us` and `eu` |
-| `gcloud documentai` is unavailable | SDK does not include that command group | Use the console or Python client; this does not mean the API is unavailable |
-| OCR text is garbled | Legacy font encoding, poor scan, complex layout, or language mismatch | Preserve JSON, inspect pages, sample another OCR model/configuration, and flag for review |
+| `DefaultCredentialsError` | ADC absent or expired | `gcloud auth application-default login`, verify with `print-access-token` |
+| `PermissionDenied` / API disabled | Vertex AI API off, wrong project | Enable `aiplatform.googleapis.com` in `bahdini-data`; check `gcloud config list` |
+| `NOT_FOUND` for the model | Model name typo or unavailable in `global` | Check `GEMINI_MODEL` in `ocr_config.py` |
+| `429 RESOURCE_EXHAUSTED` | Quota / rate limit | Lower `--workers`; the runner already retries with exponential backoff |
+| Many `empty` pages, `finish_reason: MAX_TOKENS` | Extremely dense pages hit the output cap | Raise `MAX_OUTPUT_TOKENS` in `ocr_config.py`; affected pages retry on the next run |
+| Many `error` records for one PDF | Corrupt/truncated download | Confirm with `python -m fitz` open; re-download, re-run extraction, Stage A, Stage B |
+| Transcripts look "too clean" (headers gone, digits Western) | Working as designed | Prompt drops running headers/page numbers; KLPT converts digits — use `--no-normalize` if unwanted |
+| A Badini book was skipped as `not_badini` | Gate false positive (for example long Arabic preface) | Re-run with `--ignore-doc-skips --doc '<name>'`, review, consider raising `--skip-after` |
+| Costs higher than estimated | Pricing constants are estimates | Compare Billing → Reports against `est_cost_usd` sums; update constants in `ocr_config.py` |
+| Browser login fails on Linux | Headless/remote session | Use the `--no-browser` remote-bootstrap flow described in step 1.4 |
 
-## 10. Operational Checklist
+## 8. Operational checklist
 
-Use this checklist before a production run:
+Before a production-scale run:
 
-- [ ] Billing is enabled for the selected project and expected cost has been approved.
-- [ ] `documentai.googleapis.com` is enabled in that project.
-- [ ] A Document OCR processor exists and its location is recorded.
-- [ ] The processor endpoint matches its location.
-- [ ] ADC is valid for local development, or the runtime service account is configured.
-- [ ] Input and output buckets exist in the same location as the processor.
-- [ ] The Document AI service agent has required bucket permissions.
-- [ ] A one-document test and small pilot batch passed quality review.
-- [ ] The batch manifest, output prefix, operation name, and raw JSON retention location are recorded.
-- [ ] The runner defaults to dry-run and is resumable before a large submission.
-- [ ] OCR text remains separated from unreviewed native extraction and has passed corpus-quality checks.
+- [ ] Billing enabled, welcome-credit linkage confirmed, budget alert set.
+- [ ] `aiplatform.googleapis.com` enabled in `bahdini-data`; ADC valid.
+- [ ] `google-genai` and `pymupdf` installed in the `ai` conda environment.
+- [ ] Stage A re-run after the latest downloads; queue counts reviewed.
+- [ ] A pilot (`--max-pages` ≈ 300 across mixed sources) passed Stage D
+      review, including the acceptance checks above.
+- [ ] `PROMPT_VERSION` is what the pilot validated; no unversioned prompt edits.
+- [ ] Production runs go source by source with a bounded `--workers`.
+- [ ] `output/pages/` is backed up (it is the paid artifact).
+- [ ] Nothing from `corpus_unreviewed/` enters training without Stage D review.
 
-## Project Status: 2026-07-15
+## Appendix A: Document AI (retired path)
 
-For the current `bahdini-data` setup, the local developer environment has
-valid ADC and the Document AI API is enabled. At the time of this guide, no
-processor and no Cloud Storage buckets have been created yet. The next manual
-action is therefore to create the processor, choose its location, and create
-the corresponding buckets before an OCR runner can submit work.
+Document AI Enterprise OCR was fully set up and evaluated before the project
+diverged to Gemini. It is **not used** for production OCR. Kept for
+reference and possible re-evaluation:
+
+- Processor: `bahdini-enterprise-ocr`, type `OCR_PROCESSOR`, state `ENABLED`,
+  location `us`, processor ID `6c2e13121ee43056`, resource name
+  `projects/377090410782/locations/us/processors/6c2e13121ee43056`.
+- API `documentai.googleapis.com` is enabled; no Cloud Storage buckets were
+  ever created (the evaluation used synchronous processing only).
+- Comparison runner:
+  [`scripts/compare_document_ai_gemini.py`](../scripts/compare_document_ai_gemini.py)
+  — processes a page range with both providers and saves artifacts for
+  side-by-side review. Use it to re-benchmark if either provider changes
+  materially.
+- If Document AI is ever revisited: keep `enable_native_pdf_parsing=False`
+  (legacy text layers are corrupt), use the location-specific endpoint
+  (`us-documentai.googleapis.com`), reconstruct text via text anchors by
+  joining every `text_segments` slice (missing `start_index` means 0), and
+  keep `\n\f\n` page separators. Batch processing would additionally need
+  input/output buckets co-located with the processor and
+  `roles/storage.objectViewer` / `roles/storage.objectCreator` for
+  `service-377090410782@gcp-sa-documentai.iam.gserviceaccount.com`.
+- Retirement rationale: more Bahdini character errors than Gemini, no
+  language gating, and ≈ 40% higher cost at equal or worse quality
+  (measured $0.00150/page vs ≈ $0.00090/page in the pilot).
+
+## Project status: 2026-07-15
+
+Gemini pipeline built and smoke-tested end to end (a 4-page Badini magazine
+document transcribed correctly under prompt `v4`; a 1,002-page Arabic novel
+gated and skipped for $0.0024). Work queue: 2,869 documents / 201,327 pages,
+all present on disk. The full production run has **not** been started; the
+next action is the ~300-page mixed-source pilot followed by Stage D review.

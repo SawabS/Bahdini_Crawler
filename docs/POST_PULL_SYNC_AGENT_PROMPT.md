@@ -101,11 +101,11 @@ Work in the following order.
    - a separate list of old directories that could be deleted only after user
      review. Do not delete them yourself.
 
-Document AI is optional at this stage. Do not upload any document, create a
-processor, create buckets, enable billing, or submit OCR work unless the user
-explicitly asks. If OCR setup is requested, follow
-`docs/DOCUMENT_AI_OCR_GUIDE.md` and process a small pilot batch before any
-large submission.
+OCR is optional at this stage. Do not enable billing, call any cloud API, or
+submit OCR work unless the user explicitly asks. If OCR setup is requested,
+follow `docs/DOCUMENT_AI_OCR_GUIDE.md` (the OCR single source of truth; the
+production path is the Gemini pipeline in `gemini_ocr_pipeline/`) and process
+a small pilot before any large submission.
 
 Begin by presenting the baseline inventory and one concrete migration plan.
 Then make the smallest reversible change, validate it immediately, and
