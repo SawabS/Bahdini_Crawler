@@ -182,6 +182,19 @@ def record_key(rec: dict) -> str:
     return rec.get("input", rec["file"])
 
 
+def source_input_keys(src: str) -> set[str]:
+    in_dir, kind, recursive = SOURCES[src]
+    if not in_dir.is_dir():
+        return set()
+    ext = ".pdf" if kind == "pdf" else ".txt"
+    paths = in_dir.rglob("*") if recursive else in_dir.iterdir()
+    return {
+        path.relative_to(in_dir).as_posix()
+        for path in paths
+        if path.suffix.lower() == ext
+    }
+
+
 def load_done(manifest: Path) -> dict:
     done = {}
     if manifest.exists():
@@ -228,7 +241,13 @@ def classify_source(src: str) -> None:
     if not manifest.exists():
         return
 
-    records = load_done(manifest)
+    input_keys = source_input_keys(src)
+    if not input_keys:
+        return
+    records = {
+        key: rec for key, rec in load_done(manifest).items()
+        if key in input_keys
+    }
     buckets = {"safe": [], "ocr_needed": []}
     for rec in records.values():
         bucket, reason = classification(rec)
@@ -288,7 +307,7 @@ def main():
         ext = ".pdf" if kind == "pdf" else ".txt"
         paths = in_dir.rglob("*") if recursive else in_dir.iterdir()
         files = sorted(p for p in paths
-                       if p.suffix.lower() == ext and not p.name.startswith("."))
+                       if p.suffix.lower() == ext)
         todo = [p for p in files if p.relative_to(in_dir).as_posix() not in done]
         if args.limit:
             todo = todo[:args.limit]

@@ -1,8 +1,17 @@
 # extractions/
 
 Normalized plain-text corpus produced by `scripts/extract_pipeline.py`
-(run inside the conda `ai` env). One subfolder per source, one `.txt`
-per input document:
+(run inside the conda `ai` env). Every source has two output folders:
+
+- `safe/` contains normalized `.txt` files suitable as initial Bahdini
+  training candidates, plus a `_manifest.jsonl` index.
+- `ocr_needed/` contains a `_manifest.jsonl` index for documents that need
+  Google Document AI/OCR or review. When a partial or suspect extraction
+  exists, its `.txt` is placed here too.
+
+The root `_manifest.jsonl` records every current input document. Files removed
+from an input source are automatically removed from the generated manifests on
+the next extraction or `--classify-only` run.
 
 | folder | input | documents |
 |---|---|---|
@@ -35,6 +44,21 @@ Manifest rows also carry `chars`, `chars_per_page`, `empty_page_ratio`,
 (count of letters that exist in Kurdish but not Arabic — a low count on a
 large document suggests an Arabic-language book or a legacy font encoding
 where e.g. پ/گ were stored as ث/ط).
+
+## Training-candidate classification
+
+`safe/` is deliberately conservative. A document must have status
+`extracted`, at least 200 characters, at least 50% Arabic-script letters, and
+(for texts of at least 1,000 characters) a non-trivial share of Kurdish-only
+letters. Documents that fail any check, including `extracted_suspect`,
+`extracted_partial`, `needs_ocr`, and extraction errors, are listed in
+`ocr_needed/` with `classification_reason` in their manifest row.
+
+Run only the sorting and language-quality pass without re-extracting:
+
+```bash
+conda run --no-capture-output -n ai python -u scripts/extract_pipeline.py --classify-only
+```
 
 `extraction_summary.json` aggregates counts per source. The `.txt` outputs
 are gitignored (regenerate with the script); manifests and summaries are

@@ -1,0 +1,17 @@
+{
+  "source": "facebook",
+  "input": "ئازادى لة عةشق بيروزترة - رومان - سةربةست خةسرةو عارف.pdf",
+  "out": "ئازادى لة عةشق بيروزترة - رومان - سةربةست خةسرةو عارف.txt",
+  "classification": "needs_document_ai",
+  "confidence": "high",
+  "evidence_pages": [1, 2, 3],
+  "issues": [
+    "garbled punctuation",
+    "isolated letters",
+    "legacy-font glyph substitutions",
+    "missing paragraphs and large mismatches"
+  ],
+  "comparison_notes": "The extracted text is severely garbled, containing mostly isolated letters, random Latin/ASCII characters, and large gaps. This indicates a complete failure of standard text extraction likely due to legacy, non-Unicode fonts.",
+  "recommendation": "Use Document AI / OCR to properly extract the text, as the embedded font mapping is broken.",
+  "document_ai_reason": "Standard extraction yields garbled, isolated characters and incorrect glyph substitutions. OCR is required to reconstruct the visual text correctly."
+}

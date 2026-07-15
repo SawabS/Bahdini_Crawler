@@ -1,0 +1,4 @@
+{
+  "classification": "needs_document_ai",
+  "reason": "The text suffers from severe custom font and legacy encoding mapping errors. Standard Arabic/Kurdish characters are replaced by incorrect unicode points and presentation forms (e.g., 'ٛ', 'ٚ', 'ڇ', ''). The extracted text is entirely garbled and unreadable, indicating that the original PDF uses a non-Unicode legacy font and requires Document AI/OCR to properly extract the logical Kurdish text."
+}

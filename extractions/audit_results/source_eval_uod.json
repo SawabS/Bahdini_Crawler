@@ -1,0 +1,4 @@
+{
+  "classification": "needs_document_ai",
+  "reason": "The text is entirely Arabic rather than Kurdish Bahdini, qualifying as junk content. Furthermore, the text is severely garbled: words are reversed (e.g. 'دمحم' instead of 'محمد'), lines and punctuation are in visual rather than logical order, and Arabic letters are incorrectly replaced with Kurdish equivalents (e.g., 'ە' instead of 'ة', 'ک' instead of 'ك')."
+}

@@ -1,0 +1,4 @@
+{
+  "classification": "needs_document_ai",
+  "reason": "The extracted text contains severe font mapping issues, including Hebrew characters like 'ל' and 'כ' substituting Kurdish letters. The text also exhibits disjointed letters, broken words (e.g., 'د یاریه ۆ ب'), and Arabic legacy-font garbling (e.g. 'شارستانלن سه دێ'). This indicates that while the PDF may be visually correct, its embedded text layer is unreadable and requires OCR."
+}

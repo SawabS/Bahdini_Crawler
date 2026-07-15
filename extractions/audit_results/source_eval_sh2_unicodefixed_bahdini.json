@@ -1,0 +1,4 @@
+{
+  "classification": "safe_no_document_ai",
+  "reason": "The source document contains logically ordered text. Standard Arabic characters used for Kurdish (like 'ك' and 'ى') have been correctly mapped to their Kurdish unicode equivalents ('ک' and 'ی') in the extraction. There are no presentation form characters, no reversed words, and the punctuation is well preserved. The document is safe."
+}

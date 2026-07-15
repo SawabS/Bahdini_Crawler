@@ -1,47 +1,141 @@
 {
   "telegram_badini_book": {
-    "documents": 993,
+    "documents": 885,
     "by_status": {
-      "extracted": 791,
-      "needs_ocr": 128,
-      "extracted_suspect": 73,
+      "needs_ocr": 109,
+      "extracted": 705,
+      "extracted_suspect": 70,
       "extracted_partial": 1
     },
-    "extracted_chars": 145192419
+    "by_classification": {
+      "ocr_needed": 427,
+      "safe": 458
+    },
+    "extracted_chars": 128322312
   },
   "telegram_jihana_pertuken_pdf": {
-    "documents": 774,
+    "documents": 702,
     "by_status": {
-      "extracted": 596,
-      "needs_ocr": 116,
-      "extracted_suspect": 59,
+      "extracted": 534,
+      "needs_ocr": 114,
+      "extracted_suspect": 51,
       "extracted_partial": 2,
       "error": 1
     },
-    "extracted_chars": 111706649
+    "by_classification": {
+      "ocr_needed": 349,
+      "safe": 353
+    },
+    "extracted_chars": 100384646
   },
   "telegram_pertok_badini": {
-    "documents": 157,
+    "documents": 156,
     "by_status": {
-      "extracted": 104,
+      "extracted": 103,
       "extracted_suspect": 10,
       "needs_ocr": 42,
       "extracted_partial": 1
     },
-    "extracted_chars": 24872350
+    "by_classification": {
+      "safe": 78,
+      "ocr_needed": 78
+    },
+    "extracted_chars": 24849981
+  },
+  "facebook": {
+    "documents": 1318,
+    "by_status": {
+      "extracted": 486,
+      "extracted_suspect": 228,
+      "needs_ocr": 594,
+      "extracted_partial": 10
+    },
+    "by_classification": {
+      "ocr_needed": 1100,
+      "safe": 218
+    },
+    "extracted_chars": 164822874
   },
   "sh2_unicodefixed_bahdini": {
     "documents": 241,
     "by_status": {
       "extracted": 241
     },
+    "by_classification": {
+      "safe": 237,
+      "ocr_needed": 4
+    },
     "extracted_chars": 6266370
   },
+  "govarabadinan": {
+    "documents": 0,
+    "by_status": {},
+    "by_classification": {},
+    "extracted_chars": 0
+  },
+  "govarametin": {
+    "documents": 0,
+    "by_status": {},
+    "by_classification": {},
+    "extracted_chars": 0
+  },
   "pertokenbadini": {
-    "documents": 1,
+    "documents": 215,
     "by_status": {
-      "extracted": 1
+      "extracted": 175,
+      "extracted_suspect": 22,
+      "needs_ocr": 17,
+      "extracted_partial": 1
     },
-    "extracted_chars": 80622
+    "by_classification": {
+      "safe": 75,
+      "ocr_needed": 140
+    },
+    "extracted_chars": 44356738
+  },
+  "spirez": {
+    "documents": 2291,
+    "by_status": {
+      "extracted": 419,
+      "needs_ocr": 1863,
+      "extracted_suspect": 9
+    },
+    "by_classification": {
+      "ocr_needed": 2072,
+      "safe": 219
+    },
+    "extracted_chars": 5404413
+  },
+  "uod": {
+    "documents": 1481,
+    "by_status": {
+      "extracted": 1452,
+      "extracted_suspect": 29
+    },
+    "by_classification": {
+      "ocr_needed": 900,
+      "safe": 581
+    },
+    "extracted_chars": 61893728
+  },
+  "xaniagency": {
+    "documents": 0,
+    "by_status": {},
+    "by_classification": {},
+    "extracted_chars": 0
+  },
+  "zcks": {
+    "documents": 713,
+    "by_status": {
+      "needs_ocr": 130,
+      "extracted": 507,
+      "extracted_partial": 4,
+      "extracted_suspect": 72
+    },
+    "by_classification": {
+      "ocr_needed": 397,
+      "safe": 316
+    },
+    "extracted_chars": 40967676
   }
 }

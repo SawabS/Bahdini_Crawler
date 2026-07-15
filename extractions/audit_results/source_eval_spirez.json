@@ -1,0 +1,4 @@
+{
+  "classification": "needs_document_ai",
+  "reason": "Lam-Alif ligatures are extracted backwards as Alif-Lam (e.g., 'الیێ' instead of 'لایێ', 'رووپەالن' instead of 'رووپەلان'). Left-to-right text (numbers, dates) interspersed with Right-to-left text is jumbled with misplaced parentheses and colons. Arabic words also suffer from letter transpositions (e.g., 'للنرش' instead of 'للنشر')."
+}

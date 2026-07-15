@@ -1,0 +1,5 @@
+{
+  "document_path": "/home/sawab/AI - Project/KI_finetuning/data/Bahdini_Crawler/extractions/telegram_pertok_badini/safe/1001 موسلمان و داهينان ..226.txt",
+  "classification": "needs_document_ai",
+  "reasoning": "Extracted text contains severe character encoding issues, Arabic presentation-form characters, isolated letters, and garbled words. The PDF text layer does not map to correct Unicode Kurdish/Arabic characters."
+}

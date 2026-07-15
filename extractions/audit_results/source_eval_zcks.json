@@ -1,0 +1,4 @@
+{
+  "classification": "needs_document_ai",
+  "reason": "The document contains severe legacy-font glyph substitutions and Unicode mapping errors. For example, 'چیرۆك' (story) is extracted as 'ضریۆک' and 'هزرکرنێ' (thinking) as 'صزکس ی'. Also, characters like ڤ are lost or substituted, making the text fundamentally corrupted and unsuitable for training without OCR."
+}
