@@ -1,12 +1,5 @@
 # Post-Pull Sync Agent Prompt
 
-Give the following prompt to an agent running in a local clone that was
-created before the repository-layout changes and has now pulled the current
-branch. It is written to preserve local corpora, sessions, credentials, and
-uncommitted work while bringing that checkout into alignment with the current
-repository.
-
-```text
 You are synchronizing an older local checkout of the Bahdini Crawler after it
 has pulled the current repository. The repository layout and processing
 workflow have changed. Perform a careful migration in place.
@@ -118,11 +111,3 @@ Begin by presenting the baseline inventory and one concrete migration plan.
 Then make the smallest reversible change, validate it immediately, and
 continue iteratively.
 ```
-
-## Use
-
-Copy the fenced prompt into the other person's coding agent chat after they
-have pulled the current branch. The agent should run from the repository root.
-Ask them to paste the baseline inventory before allowing any migration of
-large raw directories; this makes path mapping reviewable before data is
-touched.
