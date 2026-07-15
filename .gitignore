@@ -27,3 +27,4 @@ venv/
 # extracted text corpus: regenerate via scripts/extract_pipeline.py;
 # manifests and summaries stay tracked, including safe/OCR classification indexes
 extractions/**/*.txt
+document_ai_sample/

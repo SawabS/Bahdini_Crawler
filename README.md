@@ -57,7 +57,6 @@ and reports.
 |---|---|---|
 | [spirez.org](https://spirez.org/) | Badini literary magazine | 2,291 PDFs (mostly scanned issues) |
 | [zcks.uoz.edu.krd](https://zcks.uoz.edu.krd/) | Zakho Center for Kurdish Studies | 713 PDFs (books, theses, journals) |
-| [journal.uod.ac](https://journal.uod.ac/index.php/uodjournal) | University of Duhok journal (OJS) | 1,481 article PDFs |
 | [govarabadinan.blogspot.com](https://govarabadinan.blogspot.com/) | Badini blog magazine | HTML posts only, structure mapped |
 | [xaniagency.com](https://xaniagency.com/) | Kurdish news agency (WordPress) | HTML articles only, crawl stopped early |
 | [govarametin.com](https://govarametin.com/) | Badini magazine | blocked at ISP level, see [docs/BLOCKERS.md](docs/BLOCKERS.md) |
@@ -75,6 +74,45 @@ and reports.
 The `crawls/` directory is the canonical location for all collected raw data,
 including web crawls, Facebook, and Telegram. Cross-source processing lives in
 `scripts/`; derived text sits in `extractions/`.
+
+
+```mermaid
+graph TD
+    %% Main Repository Node
+    Root([Bahdini_Crawler])
+    
+    %% Top Level Directories
+    Root --> Web[web/]
+    Root --> Crawls[crawls/]
+    Root --> Extractions[extractions/]
+    Root --> Scripts[scripts/]
+    Root --> Docs[docs/]
+    Root --> Sources[sources/]
+    Root --> Sample[document_ai_sample/]
+    
+    %% Web Crawler
+    Web --> CrawlerPy[crawler.py]
+    
+    %% Crawls structure
+    Crawls --> FB[facebook/]
+    Crawls --> TG[telegram/]
+    Crawls --> Sites["govarabadinan/ , spirez/ , etc."]
+    
+    %% Extractions structure
+    Extractions --> ExtText["Extracted Text (*.txt)"]
+    Extractions --> OCR[needs_ocr.csv]
+    
+    %% Sample structure
+    Sample --> SampleDocs["1.5% Sampled Documents"]
+    
+    %% Scripts
+    Scripts --> ExtractPy[extract_pipeline.py]
+    Scripts --> TokenPy[token_estimate.py]
+    
+    %% Styles
+    classDef dir fill:#f9f,stroke:#333,stroke-width:2px;
+    class Root,Web,Crawls,Extractions,Scripts,Docs,Sources,Sample dir;
+```
 
 ```
 Bahdini_Crawler/
@@ -95,8 +133,8 @@ Bahdini_Crawler/
 │
 ├── crawls/                    # all raw crawler data
 │   ├── crawl_summary.json     # machine-readable per-site summary
-│   ├── arabic_docs/           # classified Arabic documents (not tracked)
-│   ├── latin_kurdish_docs/    # classified Latin Kurmanji documents (not tracked)
+│
+│
 │   ├── facebook/              # "Partokxana Electroni" group scrape
 │   │   ├── facebook_pdf_downloader.py  # Playwright scraper (login, scan, download)
 │   │   ├── pdf_table.md       # per-PDF list with is_bahdini / is_arabic tags
@@ -125,6 +163,9 @@ Bahdini_Crawler/
 │   ├── <source>/*.txt         # extracted text (NOT in git, regenerate via the pipeline)
 │   ├── extraction_summary.json
 │   └── needs_ocr.csv          # scanned PDFs for a future Document AI pass
+│
+
+├── document_ai_sample/        # 1.5% representative sample for Google Document AI auditing
 │
 ├── docs/
 │   ├── CRAWL_REPORT.md        # full crawl results + Badini token estimate
