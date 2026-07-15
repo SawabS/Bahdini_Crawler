@@ -77,16 +77,39 @@ including web crawls, Facebook, and Telegram. Cross-source processing lives in
 
 
 ```mermaid
-flowchart TB
-   root["Bahdini_Crawler"]
-   root --> crawls["crawls/"]
-   root --> collection["web/ and sources/"]
-   root --> processing["scripts/ and extractions/"]
-   root --> documentation["docs/ and logs/"]
+flowchart LR
+   subgraph collection["Collection"]
+      web["web/<br/>crawler and source configuration"]
+      facebook_collector["Facebook collector"]
+      telegram_collector["Telegram collector"]
+      supplied_text["sources/<br/>manually supplied text"]
+   end
 
-   crawls --> sites["website crawls"]
-   crawls --> facebook["facebook/"]
-   crawls --> telegram["telegram/"]
+   subgraph crawls["crawls/ - raw collected data"]
+      websites["website crawls<br/>documents, pages, URL inventories"]
+      facebook["facebook/<br/>PDFs and crawl metadata"]
+      telegram["telegram/<br/>downloads and channel state"]
+   end
+
+   pipeline["scripts/extract_pipeline.py<br/>text extraction and quality checks"]
+
+   subgraph outputs["Derived outputs"]
+      extractions["extractions/<br/>normalized text and manifests"]
+      ocr["needs_ocr.csv<br/>scanned-document queue"]
+   end
+
+   web --> websites
+   facebook_collector --> facebook
+   telegram_collector --> telegram
+   websites --> pipeline
+   facebook --> pipeline
+   telegram --> pipeline
+   supplied_text --> pipeline
+   pipeline --> extractions
+   pipeline --> ocr
+
+   docs["docs/<br/>crawl reports and blockers"] -. documents .-> crawls
+   docs -. reports on .-> outputs
 ```
 
 ```
