@@ -77,41 +77,16 @@ including web crawls, Facebook, and Telegram. Cross-source processing lives in
 
 
 ```mermaid
-graph TD
-    %% Main Repository Node
-    Root([Bahdini_Crawler])
-    
-    %% Top Level Directories
-    Root --> Web[web/]
-    Root --> Crawls[crawls/]
-    Root --> Extractions[extractions/]
-    Root --> Scripts[scripts/]
-    Root --> Docs[docs/]
-    Root --> Sources[sources/]
-    Root --> Sample[document_ai_sample/]
-    
-    %% Web Crawler
-    Web --> CrawlerPy[crawler.py]
-    
-    %% Crawls structure
-    Crawls --> FB[facebook/]
-    Crawls --> TG[telegram/]
-    Crawls --> Sites["govarabadinan/ , spirez/ , etc."]
-    
-    %% Extractions structure
-    Extractions --> ExtText["Extracted Text (*.txt)"]
-    Extractions --> OCR[needs_ocr.csv]
-    
-    %% Sample structure
-    Sample --> SampleDocs["1.5% Sampled Documents"]
-    
-    %% Scripts
-    Scripts --> ExtractPy[extract_pipeline.py]
-    Scripts --> TokenPy[token_estimate.py]
-    
-    %% Styles
-    classDef dir fill:#f9f,stroke:#333,stroke-width:2px;
-    class Root,Web,Crawls,Extractions,Scripts,Docs,Sources,Sample dir;
+flowchart TB
+   root["Bahdini_Crawler"]
+   root --> crawls["crawls/"]
+   root --> collection["web/ and sources/"]
+   root --> processing["scripts/ and extractions/"]
+   root --> documentation["docs/ and logs/"]
+
+   crawls --> sites["website crawls"]
+   crawls --> facebook["facebook/"]
+   crawls --> telegram["telegram/"]
 ```
 
 ```
