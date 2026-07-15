@@ -32,6 +32,7 @@ and reports.
 |---|---|
 | See what was collected and the token estimate | [docs/CRAWL_REPORT.md](docs/CRAWL_REPORT.md) |
 | See what went wrong (blocked site, malware finding, rate limits) | [docs/BLOCKERS.md](docs/BLOCKERS.md) |
+| Set up Google Document AI and run reproducible batch OCR | [docs/DOCUMENT_AI_OCR_GUIDE.md](docs/DOCUMENT_AI_OCR_GUIDE.md) |
 | See the source sites, their robots.txt and sitemaps | [web/config/base_urls.md](web/config/base_urls.md) |
 | Browse a site's page structure | `crawls/<site>/site_structure.md` |
 | Look up a downloaded file's origin URL | `crawls/<site>/documents.csv` |
