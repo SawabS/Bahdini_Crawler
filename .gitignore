@@ -20,5 +20,5 @@ __pycache__/
 *.pyc
 
 # extracted text corpus: regenerate via scripts/extract_pipeline.py;
-# the _manifest.jsonl files and summary stay tracked
-extractions/*/*.txt
+# manifests and summaries stay tracked, including safe/OCR classification indexes
+extractions/**/*.txt

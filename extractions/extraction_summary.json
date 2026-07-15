@@ -36,5 +36,12 @@
       "extracted": 241
     },
     "extracted_chars": 6266370
+  },
+  "pertokenbadini": {
+    "documents": 1,
+    "by_status": {
+      "extracted": 1
+    },
+    "extracted_chars": 80622
   }
 }
