@@ -34,10 +34,10 @@ OUT_ROOT = ROOT / "extractions"
 
 # source name -> (input dir, kind, recursive)
 SOURCES = {
-    "telegram_badini_book": (ROOT / "telegram/downloads/Badini_book", "pdf", False),
-    "telegram_jihana_pertuken_pdf": (ROOT / "telegram/downloads/jihana_pertuken_pdf", "pdf", False),
-    "telegram_pertok_badini": (ROOT / "telegram/downloads/pertok_badini", "pdf", False),
-    "facebook": (ROOT / "facebook/pdfs", "pdf", False),
+    "telegram_badini_book": (ROOT / "crawls/telegram/downloads/Badini_book", "pdf", False),
+    "telegram_jihana_pertuken_pdf": (ROOT / "crawls/telegram/downloads/jihana_pertuken_pdf", "pdf", False),
+    "telegram_pertok_badini": (ROOT / "crawls/telegram/downloads/pertok_badini", "pdf", False),
+    "facebook": (ROOT / "crawls/facebook/pdfs", "pdf", False),
     "sh2_unicodefixed_bahdini": (ROOT / "sources/sh2_unicodefixed", "txt", False),
 }
 

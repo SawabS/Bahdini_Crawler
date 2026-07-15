@@ -1,23 +1,28 @@
 # downloaded corpora: too large for git (~7.4 GB)
 crawls/*/documents/
+# language-classified and unmatched raw documents are also kept out of git
+crawls/arabic_docs/
+crawls/latin_kurdish_docs/
+crawls/unmatched_restored_pdfs/
 
 # Facebook group scrape: PDFs too large for git (~6 GB)
-facebook/pdfs/
+crawls/facebook/pdfs/
 # Facebook session cookies: never commit
-facebook/.fb_profile/
-facebook/.vscode/
+crawls/facebook/.fb_profile/
+crawls/facebook/.vscode/
 
 # Telegram channel downloads: books too large for git (~12 GB);
 # the .download_state.json manifests stay tracked
-telegram/downloads/**
-!telegram/downloads/*/
-!telegram/downloads/*/.download_state.json
+crawls/telegram/downloads/**
+!crawls/telegram/downloads/*/
+!crawls/telegram/downloads/*/.download_state.json
 # Telegram login session and credentials: never commit
-telegram/.telegram/
-telegram/.env
+crawls/telegram/.telegram/
+crawls/telegram/.env
 
 __pycache__/
 *.pyc
+venv/
 
 # extracted text corpus: regenerate via scripts/extract_pipeline.py;
 # manifests and summaries stay tracked, including safe/OCR classification indexes

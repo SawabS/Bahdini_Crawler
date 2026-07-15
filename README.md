@@ -7,10 +7,10 @@ everything they harvested:
 1. **Web crawler** ([web/crawler.py](web/crawler.py)): crawls six Badini
    websites, maps their full page structure, and downloads every publicly
    linked document (PDF, DOC/DOCX, XLS/XLSX, PPT/PPTX, ZIP and more).
-2. **Facebook group scraper** ([facebook/](facebook/)): a Playwright-based
+2. **Facebook group scraper** ([crawls/facebook/](crawls/facebook/)): a Playwright-based
    scraper for the "Partokxana Electroni" (Electronic Library) Facebook
    group.
-3. **Telegram channel downloader** ([telegram/](telegram/)): a Telethon-based
+3. **Telegram channel downloader** ([crawls/telegram/](crawls/telegram/)): a Telethon-based
    downloader that pulls every document attachment from three Badini book
    channels, and also follows links posted in messages (direct files, Google
    Drive, MediaFire, Dropbox).
@@ -35,8 +35,8 @@ and reports.
 | See the source sites, their robots.txt and sitemaps | [web/config/base_urls.md](web/config/base_urls.md) |
 | Browse a site's page structure | `crawls/<site>/site_structure.md` |
 | Look up a downloaded file's origin URL | `crawls/<site>/documents.csv` |
-| Check the Facebook scrape and its Badini/Arabic tagging | [facebook/](facebook/) (`pdf_table.md`, `manifest.json`) |
-| Look up a Telegram download's source message or link | `telegram/downloads/<channel>/.download_state.json` |
+| Check the Facebook scrape and its Badini/Arabic tagging | [crawls/facebook/](crawls/facebook/) (`pdf_table.md`, `manifest.json`) |
+| Look up a Telegram download's source message or link | `crawls/telegram/downloads/<channel>/.download_state.json` |
 | Use the extracted text corpus / see per-document quality stats | [extractions/README.md](extractions/README.md) |
 | See which PDFs need OCR (Document AI queue) | [extractions/needs_ocr.csv](extractions/needs_ocr.csv) |
 | Re-run or extend a crawl | [Quick start](#quick-start) below |
@@ -72,9 +72,9 @@ and reports.
 
 ## Repository layout
 
-Collectors are self-contained folders (code next to its config, state and
-credentials); cross-source processing lives in `scripts/`; harvested data
-and derived text sit in top-level output folders (`crawls/`, `extractions/`).
+The `crawls/` directory is the canonical location for all collected raw data,
+including web crawls, Facebook, and Telegram. Cross-source processing lives in
+`scripts/`; derived text sits in `extractions/`.
 
 ```
 Bahdini_Crawler/
@@ -86,23 +86,6 @@ Bahdini_Crawler/
 │       ├── base_urls.md       # source sites, robots.txt and sitemap notes
 │       └── govarabadinan.xml  # locally supplied sitemap for the Blogspot source
 │
-├── facebook/                  # "Partokxana Electroni" group scrape (own README)
-│   ├── facebook_pdf_downloader.py  # Playwright scraper (login, scan, download)
-│   ├── pdf_table.md           # per-PDF list with is_bahdini / is_arabic tags
-│   ├── manifest.json          # per-post download log (makes runs resumable)
-│   ├── permalinks.json        # harvested group post IDs
-│   ├── legacy/                # superseded first version of the scraper
-│   └── pdfs/                  # downloaded PDFs (NOT in git, ~6 GB)
-│
-├── telegram/                  # Telegram channel downloader
-│   ├── download_telegram_documents.py  # Telethon downloader (attachments + posted links)
-│   ├── run_downloader.sh      # launcher (conda env, unbuffered output)
-│   ├── requirements.txt       # Telethon, cryptg, aiohttp
-│   ├── .telegram/             # login session (NOT in git, private)
-│   └── downloads/             # one folder per channel
-│       ├── <channel>/         # downloaded books (NOT in git, ~12 GB)
-│       └── <channel>/.download_state.json  # manifest: message ids, sizes, link outcomes
-│
 ├── sources/                   # manually supplied raw text drops
 │   └── sh2_unicodefixed/      # 241 Bahdini .txt files (unicode-fixed)
 │
@@ -110,8 +93,25 @@ Bahdini_Crawler/
 │   ├── extract_pipeline.py    # PDFs/raw text -> normalized corpus in extractions/
 │   └── token_estimate.py      # PDF sampling + Kurdish text classification
 │
-├── crawls/                    # web crawler output, one folder per site
+├── crawls/                    # all raw crawler data
 │   ├── crawl_summary.json     # machine-readable per-site summary
+│   ├── arabic_docs/           # classified Arabic documents (not tracked)
+│   ├── latin_kurdish_docs/    # classified Latin Kurmanji documents (not tracked)
+│   ├── facebook/              # "Partokxana Electroni" group scrape
+│   │   ├── facebook_pdf_downloader.py  # Playwright scraper (login, scan, download)
+│   │   ├── pdf_table.md       # per-PDF list with is_bahdini / is_arabic tags
+│   │   ├── manifest.json      # per-post download log (makes runs resumable)
+│   │   ├── permalinks.json    # harvested group post IDs
+│   │   ├── legacy/            # superseded first version of the scraper
+│   │   └── pdfs/              # downloaded PDFs (NOT in git, ~6 GB)
+│   ├── telegram/              # Telegram channel downloader
+│   │   ├── download_telegram_documents.py  # Telethon downloader (attachments + posted links)
+│   │   ├── run_downloader.sh  # launcher (conda env, unbuffered output)
+│   │   ├── requirements.txt   # Telethon, cryptg, aiohttp
+│   │   ├── .telegram/         # login session (NOT in git, private)
+│   │   └── downloads/         # one folder per channel
+│   │       ├── <channel>/     # downloaded books (NOT in git, ~12 GB)
+│   │       └── <channel>/.download_state.json  # manifest: message ids, sizes, link outcomes
 │   └── <site>/
 │       ├── documents/         # downloaded files (NOT in git, ~7.4 GB)
 │       ├── pages.jsonl        # one JSON record per crawled page
@@ -176,13 +176,13 @@ per-document statuses, and the needs-OCR queue.
 
 ### Facebook scraper
 
-See the dedicated [README](facebook/README.md)
+See the dedicated [README](crawls/facebook/README.md)
 (needs Playwright and a Facebook account that is a member of the group).
 
 ### Telegram downloader
 
 Requires the `ai` conda environment with the packages in
-[telegram/requirements.txt](telegram/requirements.txt). One-time setup: create
+[crawls/telegram/requirements.txt](crawls/telegram/requirements.txt). One-time setup: create
 an application at <https://my.telegram.org/apps> and export its credentials
 (never commit the API hash):
 
@@ -195,13 +195,13 @@ export TELEGRAM_PHONE='+964...'
 Then:
 
 ```bash
-telegram/run_downloader.sh                 # scan + download the three channels
-telegram/run_downloader.sh --dry-run       # preview without changing state
-telegram/run_downloader.sh --channel https://t.me/example   # another channel
+crawls/telegram/run_downloader.sh                 # scan + download the three channels
+crawls/telegram/run_downloader.sh --dry-run       # preview without changing state
+crawls/telegram/run_downloader.sh --channel https://t.me/example   # another channel
 ```
 
 The first run asks for the Telegram login code; the session is stored in
-`telegram/.telegram/` and must stay private. Runs are resumable: scans are
+`crawls/telegram/.telegram/` and must stay private. Runs are resumable: scans are
 checkpointed per channel, partial files continue where they stopped, and
 completed files are verified by size and PDF magic bytes before being kept.
 
@@ -212,7 +212,7 @@ parallel HTTP range requests. Posted links are followed automatically (direct
 files, Google Drive including the virus-scan interstitial, Google Docs,
 MediaFire download pages, Dropbox); dead and non-document links are remembered
 in `.download_state.json` and never probed twice. See
-`telegram/run_downloader.sh --help` for tuning flags
+`crawls/telegram/run_downloader.sh --help` for tuning flags
 (`--concurrent-downloads`, `--parallel-connections`, `--download-retries`,
 `--force-rescan`).
 
