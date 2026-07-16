@@ -171,11 +171,17 @@ async def call_openrouter(session, page_sem, api_key, png_bytes, state):
                 async with session.post(
                         cfg.OPENROUTER_URL, headers=headers, json=payload,
                         timeout=aiohttp.ClientTimeout(total=120)) as resp:
-                    if resp.status == 402:
+                    if resp.status in (402, 403):
+                        # 402 is the documented "out of credit" response, but a
+                        # key that has hit its hard cap has also been observed
+                        # returning plain 403 Forbidden instead - treat both as
+                        # a hard stop rather than retrying 5x per page against
+                        # a key that is not going to start working again.
                         state["stop"] = True
                         body = (await resp.text())[:200]
                         return {"status": "error", "text": "",
-                                "error": f"HTTP 402 (OpenRouter credit exhausted): {body}"}
+                                "error": f"HTTP {resp.status} (OpenRouter credit "
+                                         f"exhausted or key forbidden): {body}"}
                     if resp.status == 429 or resp.status >= 500:
                         body = (await resp.text())[:200]
                         raise RuntimeError(f"HTTP {resp.status}: {body}")
