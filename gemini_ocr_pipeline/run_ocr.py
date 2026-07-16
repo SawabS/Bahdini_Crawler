@@ -186,8 +186,32 @@ def process_document(client, row, budget: int, args, totals) -> int:
     # Pages are rendered and sent in small batches so a long book never holds
     # more than a few rendered PNGs in memory at once.
     batch_size = max(args.workers * 3, 3)
-    with fitz.open(source_path) as document:
+    try:
+        opened_document = fitz.open(source_path)
+    except Exception as exc:
+        error_record = dict(base)
+        error_record.update(
+            page=0, n_pages=0, status="error", text="",
+            error=f"{type(exc).__name__}: {exc}",
+            ts=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+        with open(record_path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(error_record, ensure_ascii=False) + "\n")
+        totals["error"] = totals.get("error", 0) + 1
+        print(f"  {row['source']}/{row['input']}: ERROR (unreadable: {exc})")
+        return 0
+
+    with opened_document as document:
         base["n_pages"] = len(document)
+        if len(document) == 0:
+            error_record = dict(base)
+            error_record.update(
+                page=0, status="error", text="", error="0-page/corrupt PDF",
+                ts=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+            with open(record_path, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(error_record, ensure_ascii=False) + "\n")
+            totals["error"] = totals.get("error", 0) + 1
+            print(f"  {row['source']}/{row['input']}: ERROR (0-page PDF)")
+            return 0
         pending = [page for page in range(1, len(document) + 1) if page not in done]
         if budget >= 0:
             pending = pending[:budget]

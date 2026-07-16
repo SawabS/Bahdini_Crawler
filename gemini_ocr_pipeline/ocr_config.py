@@ -16,6 +16,13 @@ PROJECT = "bahdini-data"
 VERTEX_LOCATION = "global"
 GEMINI_MODEL = "gemini-3.1-flash-lite"
 
+# OpenRouter backend (run_ocr_openrouter.py): same underlying model, reached
+# over OpenRouter's OpenAI-compatible API instead of Vertex AI.
+OPENROUTER_MODEL = "google/gemini-3.1-flash-lite"
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENROUTER_INPUT_USD_PER_M = 0.25
+OPENROUTER_OUTPUT_USD_PER_M = 1.50
+
 # Rendering: ~288 DPI grayscale PNG, matching the completed A/B pilot, but
 # capped so oversized scans do not produce needlessly huge images.
 RENDER_ZOOM = 4.0
@@ -28,6 +35,17 @@ INPUT_USD_PER_M = 0.30
 OUTPUT_USD_PER_M = 1.35
 
 MAX_OUTPUT_TOKENS = 8192
+
+# Sources OCR'd end-to-end from the raw crawl (every PDF, no native-text-layer
+# split): run_ocr_openrouter.py walks these directly instead of consulting
+# extractions/<source>/_manifest.jsonl's needs_ocr flag.
+FULL_CRAWL_SOURCES = {
+    "zcks": ROOT / "crawls/zcks/documents",
+    "telegram_badini_book": ROOT / "crawls/telegram/downloads/Badini_book",
+    "telegram_jihana_pertuken_pdf": ROOT / "crawls/telegram/downloads/jihana_pertuken_pdf",
+    "telegram_pertok_badini": ROOT / "crawls/telegram/downloads/pertok_badini",
+    "pertokenbadini": ROOT / "crawls/pertokenbadini/documents",
+}
 
 NO_TEXT_MARKER = "[NO_TEXT]"
 NOT_BADINI_PREFIX = "[NOT_BADINI"
@@ -93,3 +111,25 @@ def estimate_cost_usd(input_tokens: int, output_tokens: int) -> float:
     return (
         input_tokens * INPUT_USD_PER_M + output_tokens * OUTPUT_USD_PER_M
     ) / 1_000_000
+
+
+def estimate_cost_usd_openrouter(input_tokens: int, output_tokens: int) -> float:
+    return (
+        input_tokens * OPENROUTER_INPUT_USD_PER_M
+        + output_tokens * OPENROUTER_OUTPUT_USD_PER_M
+    ) / 1_000_000
+
+
+def load_dotenv_key(name: str, env_path: Path = ROOT / ".env") -> str:
+    """Minimal .env reader so the OpenRouter key doesn't need to be exported."""
+    import os
+
+    value = os.environ.get(name)
+    if value:
+        return value
+    if env_path.is_file():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith(f"{name}="):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    raise SystemExit(f"{name} not set in the environment or in {env_path}")
