@@ -21,6 +21,11 @@ Examples (inside the conda "ai" env):
 
     # full queue, 4 concurrent Gemini requests
     conda run --no-capture-output -n ai python -u gemini_ocr_pipeline/run_ocr.py --workers 4
+
+    # full queue, documents processed concurrently too (see --doc-workers) -
+    # total concurrent Gemini requests is roughly doc-workers * workers
+    conda run --no-capture-output -n ai python -u gemini_ocr_pipeline/run_ocr.py \
+      --doc-workers 8 --workers 4
 """
 
 import argparse
@@ -28,6 +33,7 @@ import hashlib
 import json
 import random
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -147,8 +153,14 @@ def consecutive_not_badini(statuses: dict) -> int:
     return longest
 
 
-def process_document(client, row, budget: int, args, totals) -> int:
-    """OCR all pending pages of one document; returns pages attempted."""
+def process_document(client, row, budget: int, args, totals, totals_lock) -> int:
+    """OCR all pending pages of one document; returns pages attempted.
+
+    May run concurrently with other process_document() calls on other
+    documents (see --doc-workers in main()); totals_lock guards the one piece
+    of state shared across those calls. Everything else here (statuses,
+    record_path, the fitz.Document) is local to this document/this call.
+    """
     source_path = cfg.ROOT / row["path"]
     record_path = cfg.PAGES_DIR / row["source"] / f"{row['doc_id']}.jsonl"
     record_path.parent.mkdir(parents=True, exist_ok=True)
@@ -165,6 +177,14 @@ def process_document(client, row, budget: int, args, totals) -> int:
         "prompt_version": cfg.PROMPT_VERSION,
     }
 
+    def bump(status, record=None):
+        with totals_lock:
+            totals[status] = totals.get(status, 0) + 1
+            if record:
+                totals["input_tokens"] += record.get("input_tokens", 0)
+                totals["output_tokens"] += record.get("output_tokens", 0)
+                totals["est_cost_usd"] += record.get("est_cost_usd", 0.0)
+
     def finish(page_number, size, png_bytes, result):
         record = dict(base)
         record.update(
@@ -177,10 +197,7 @@ def process_document(client, row, budget: int, args, totals) -> int:
         with open(record_path, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
         statuses[page_number] = record["status"]
-        totals[record["status"]] = totals.get(record["status"], 0) + 1
-        totals["input_tokens"] += record.get("input_tokens", 0)
-        totals["output_tokens"] += record.get("output_tokens", 0)
-        totals["est_cost_usd"] += record.get("est_cost_usd", 0.0)
+        bump(record["status"], record)
         print(f"  {row['source']}/{row['input']} p{page_number}: {record['status']}")
 
     # Pages are rendered and sent in small batches so a long book never holds
@@ -196,7 +213,7 @@ def process_document(client, row, budget: int, args, totals) -> int:
             ts=datetime.now(timezone.utc).isoformat(timespec="seconds"))
         with open(record_path, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(error_record, ensure_ascii=False) + "\n")
-        totals["error"] = totals.get("error", 0) + 1
+        bump("error")
         print(f"  {row['source']}/{row['input']}: ERROR (unreadable: {exc})")
         return 0
 
@@ -209,7 +226,7 @@ def process_document(client, row, budget: int, args, totals) -> int:
                 ts=datetime.now(timezone.utc).isoformat(timespec="seconds"))
             with open(record_path, "a", encoding="utf-8") as handle:
                 handle.write(json.dumps(error_record, ensure_ascii=False) + "\n")
-            totals["error"] = totals.get("error", 0) + 1
+            bump("error")
             print(f"  {row['source']}/{row['input']}: ERROR (0-page PDF)")
             return 0
         pending = [page for page in range(1, len(document) + 1) if page not in done]
@@ -256,7 +273,7 @@ def process_document(client, row, budget: int, args, totals) -> int:
                 )
                 with open(record_path, "a", encoding="utf-8") as handle:
                     handle.write(json.dumps(skip_record, ensure_ascii=False) + "\n")
-                totals["docs_skipped"] = totals.get("docs_skipped", 0) + 1
+                bump("docs_skipped")
                 print(f"  {row['source']}/{row['input']}: skipped rest of document "
                       f"(not Badini)")
                 return min(start + batch_size, len(pending))
@@ -271,7 +288,12 @@ def main() -> int:
     parser.add_argument("--max-docs", type=int, help="stop after this many documents")
     parser.add_argument("--max-pages", type=int,
                         help="global budget of pages to attempt this run (for pilots)")
-    parser.add_argument("--workers", type=int, default=2, help="concurrent Gemini requests")
+    parser.add_argument("--workers", type=int, default=2,
+                        help="concurrent Gemini requests per document (default 2)")
+    parser.add_argument("--doc-workers", type=int, default=1,
+                        help="documents processed concurrently (default 1, the original "
+                             "sequential-by-document behavior); total concurrent Gemini "
+                             "requests is roughly doc-workers * workers")
     parser.add_argument("--keep-images", action="store_true",
                         help="keep rendered PNGs under output/images/<doc_id>/")
     parser.add_argument("--skip-after", type=int, default=5,
@@ -295,14 +317,37 @@ def main() -> int:
         client = genai.Client(vertexai=True, project=cfg.PROJECT, location=cfg.VERTEX_LOCATION)
 
     totals = {"input_tokens": 0, "output_tokens": 0, "est_cost_usd": 0.0}
-    remaining = args.max_pages if args.max_pages else -1
+    totals_lock = threading.Lock()
+    budget_lock = threading.Lock()
+    # single-element list so run_one()'s closure can mutate it under the lock
+    remaining = [args.max_pages if args.max_pages else -1]
+
+    def run_one(row):
+        with budget_lock:
+            budget = remaining[0]
+        if budget == 0:
+            return 0
+        attempted = process_document(client, row, budget, args, totals, totals_lock)
+        if remaining[0] > 0:
+            with budget_lock:
+                remaining[0] -= attempted
+        return attempted
+
     try:
-        for row in queue:
-            if remaining == 0:
-                break
-            attempted = process_document(client, row, remaining, args, totals)
-            if remaining > 0:
-                remaining -= attempted
+        if args.doc_workers > 1:
+            # Documents run concurrently; --max-pages budgeting becomes
+            # best-effort (a few docs already in flight can overshoot it
+            # slightly) rather than the exact per-document slicing the
+            # sequential path below does.
+            with ThreadPoolExecutor(max_workers=args.doc_workers) as pool:
+                futures = [pool.submit(run_one, row) for row in queue]
+                for future in as_completed(futures):
+                    future.result()
+        else:
+            for row in queue:
+                if remaining[0] == 0:
+                    break
+                run_one(row)
     except KeyboardInterrupt:
         print("\nInterrupted; every finished page is already saved. Re-run to resume.")
 
