@@ -203,9 +203,16 @@ def process_document(client, row, budget: int, args, totals, totals_lock) -> int
     # Pages are rendered and sent in small batches so a long book never holds
     # more than a few rendered PNGs in memory at once.
     batch_size = max(args.workers * 3, 3)
+    opened_document = None
     try:
         opened_document = fitz.open(source_path)
+        # Some malformed PDFs open successfully but only fail when MuPDF
+        # reads their page tree.  Treat those exactly like fitz.open()
+        # failures so one bad file cannot abort an otherwise resumable run.
+        n_pages = len(opened_document)
     except Exception as exc:
+        if opened_document is not None:
+            opened_document.close()
         error_record = dict(base)
         error_record.update(
             page=0, n_pages=0, status="error", text="",
@@ -218,8 +225,8 @@ def process_document(client, row, budget: int, args, totals, totals_lock) -> int
         return 0
 
     with opened_document as document:
-        base["n_pages"] = len(document)
-        if len(document) == 0:
+        base["n_pages"] = n_pages
+        if n_pages == 0:
             error_record = dict(base)
             error_record.update(
                 page=0, status="error", text="", error="0-page/corrupt PDF",
@@ -229,7 +236,7 @@ def process_document(client, row, budget: int, args, totals, totals_lock) -> int
             bump("error")
             print(f"  {row['source']}/{row['input']}: ERROR (0-page PDF)")
             return 0
-        pending = [page for page in range(1, len(document) + 1) if page not in done]
+        pending = [page for page in range(1, n_pages + 1) if page not in done]
         if budget >= 0:
             pending = pending[:budget]
         if not pending:
