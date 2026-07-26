@@ -1,0 +1,4 @@
+interface:
+  display_name: "Editorial XeLaTeX Documents"
+  short_description: "Create polished blue-accented XeLaTeX documents"
+  default_prompt: "Use $create-editorial-xelatex-documents to create a polished XeLaTeX document from my content."

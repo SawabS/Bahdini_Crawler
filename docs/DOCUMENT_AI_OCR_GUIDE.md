@@ -512,6 +512,9 @@ Acceptance checks for a pilot batch:
 | Transcripts look "too clean" (headers gone, digits Western) | Working as designed | Prompt drops running headers/page numbers; KLPT converts digits - use `--no-normalize` if unwanted |
 | A Badini book was skipped as `not_badini` | Gate false positive (for example long Arabic preface) | Re-run with `--ignore-doc-skips --doc '<name>'`, review, consider raising `--skip-after` |
 | Costs higher than estimated | Pricing constants are estimates | Compare Billing → Reports against `est_cost_usd` sums; update constants in `ocr_config.py` |
+| `403 PERMISSION_DENIED` / `BILLING_DISABLED` partway through a run | The billing account backing the project has no payment method left (for example a promotional credit hit its cap) | Check `gcloud billing accounts describe <account-id>` for `open: false` and `gcloud billing projects describe bahdini-data` for `billingEnabled: false`; reopen the account / attach a payment method in Console → Billing before resuming - `--source` re-run picks up cleanly once billing works again |
+| Run ends with no `Run summary` and no Python traceback anywhere | The OS OOM-killer killed the process directly (`journalctl` shows `Out of memory: Killed process <pid> (python)`), not a code bug | Re-run with lower `--workers`/`--doc-workers` if it recurs - long PDFs (400–900+ pages) held with several concurrent page-workers can push RSS high enough to trigger it |
+| Output tokens look surprisingly small next to input tokens for an OCR job | Expected, not a sign of lost text: the ~2,300-char instruction `PROMPT` is resent on every page call, and each page image is vision-tokenized at a fixed, resolution-driven cost (roughly 1,000+ tokens at `MEDIA_RESOLUTION_HIGH`/`MAX_LONG_SIDE_PX=3400`) regardless of how much text is actually on the page; a typical page's real transcript (~1,280 characters, ~2.2 chars/output-token for this Arabic-script content) just doesn't out-token that fixed overhead | No action needed; see [Project status: 2026-07-21](#project-status-2026-07-21) for the worked numbers |
 | Browser login fails on Linux | Headless/remote session | Use the `--no-browser` remote-bootstrap flow described in step 1.4 |
 | `run_ocr_openrouter.py: OPENROUTER_API_KEY not set` | Key isn't in the environment or `.env` | Add `OPENROUTER_API_KEY=...` to the repo-root `.env` (Section 1B); never export it in a way that gets logged |
 | Run stops early with `"Stopped early: budget cap..."` and few pages done | Either `--budget-usd` was hit, or OpenRouter returned `402` (key credit exhausted) | Check the key's `limit_remaining` via `GET /api/v1/auth/key` (Section 1B, step 2) before assuming it's just the local `--budget-usd` |
@@ -656,3 +659,84 @@ two-level-concurrency comparison in Section 4B); (2) at the start of the
 next large run, budget in a lower `--concurrency` near the cap to reduce
 overshoot; (3) Stage D review before anything from either
 backend enters training data.
+
+## Project status: 2026-07-21
+
+**Doc completion (Vertex, `needs_ocr` queue), verified 2026-07-26 against
+`output/pages/<source>/*.jsonl` on disk:** `facebook` 594/594, `pertokenbadini`
+207/207, `spirez` 1863/1863, `telegram_badini_book` 847/836,
+`telegram_jihana_pertuken_pdf` 693/690 all fully attempted. `telegram_pertok_badini`
+149/155 (6 documents never started). `zcks` 199/713 - the real remaining gap,
+514 documents untouched.
+
+**The 16:45 "finish the queue" run ended from two independent failures ~7
+minutes apart, not one:**
+
+1. **Billing account ran out of runway.** From 2026-07-21T15:32:09Z to
+   15:39:26Z, every Vertex call started failing with a `403 PERMISSION_DENIED`
+   / `BILLING_DISABLED` response (158 page records carry this exact error).
+   Confirmed still closed on 2026-07-26: `gcloud billing accounts describe`
+   reports `open: false` for the billing account, and `gcloud billing
+   projects describe` reports `billingEnabled: false` for `bahdini-data`.
+   The Cloud Billing Reports UI (Services report, current month) shows why:
+   Vertex AI usage cost **$300.00**, entirely offset by **-$300.00 "Other
+   savings"**, net **$0.00** billed - a promotional credit hit its cap and
+   the account has no payment method behind it, so Vertex started rejecting
+   calls outright.
+   **Resuming any Vertex run requires reopening the billing account /
+   attaching a payment method first** - this was not attempted, since it's a
+   real-money account action.
+2. **OOM-kill, unrelated to billing.** At 18:39:40 local, `journalctl`
+   shows the kernel OOM-killer took the `run_ocr.py` python process itself
+   (`Out of memory: Killed process 2981346 (python)`, ~1.7GB RSS) - which is
+   why the log ends with no trailing `Run summary` block; the process never
+   got to print one. System-wide memory pressure continued for ~10 more
+   minutes (cascading OOM kills of unrelated services - syncthing,
+   pipewire, wireplumber), ending in a desktop session logout at 18:49:52;
+   that part is a side effect of the memory pressure, not something the OCR
+   job caused once it was already dead. Distinct from the `conda run`
+   session-detach gotcha noted in Section 8/memory - the process was killed
+   by the kernel for memory, not orphaned by shell teardown. If reruns keep
+   hitting OOM, lower `--workers`/`--doc-workers`: 12 page-workers against
+   several 400-900-page books in `telegram_pertok_badini` can pile up
+   rendered PNGs in memory.
+
+**Cost reconciliation.** A previously-recorded ~$52.29 total-spend figure
+was wrong - it came from parsing `Run summary` print blocks in only a
+subset of logs. Recomputed by summing `est_cost_usd` across every page
+record in `output/pages/**/*.jsonl` (282,821 page attempts): **~$336.29
+estimated**. Against the **$300.00 actual** GCP billing figure above (same
+period, both cover mid-July onward), the pipeline's own pricing constants
+in `ocr_config.py` (0.30/1.35 USD per M tokens, flagged there as unverified)
+overestimate by about 11% - close enough to trust for planning, not exact
+enough to use instead of Billing → Reports.
+
+**Corpus scale, from the same full sweep of `output/pages/**/*.jsonl`:**
+248,754 pages with `status: ok` produced **318,568,990 output characters**
+and, from Gemini's own `usage_metadata` on each response (not an estimate):
+**415,963,404 input tokens** / **145,249,648 output tokens** (561,213,052
+combined) for those pages. Per-source output tokens: `telegram_badini_book`
+58.9M, `telegram_jihana_pertuken_pdf` 52.7M, `pertokenbadini` 17.1M,
+`telegram_pertok_badini` 13.2M, `spirez` 1.7M, `zcks` 1.2M, `facebook` 0.5M.
+
+**Why output tokens are so much smaller than input tokens** (documented here
+since it looks wrong for an OCR job at first glance, but isn't): `cfg.PROMPT`
+is 2,337 characters (~580 tokens) of OCR instructions, resent in full on
+*every* page call - across 248,754 calls that alone is ~144M of the 416M
+input tokens, none of it page content. The rest of the input cost is the
+page image itself: rendered at `RENDER_ZOOM=4.0` capped at
+`MAX_LONG_SIDE_PX=3400` and sent at `MEDIA_RESOLUTION_HIGH`, Gemini's vision
+encoder tiles a full-resolution page into a fixed token budget - roughly
+1,000+ tokens - **whether the page is dense with text or mostly blank
+margin**. The actual transcript per page averages only ~1,281 characters
+(318,568,990 / 248,754), which at this script's tokenization efficiency
+(~2.2 characters per output token for Arabic-script Kurdish text, versus
+~4 chars/token typical for English) comes out to only ~584 output
+tokens/page. Net effect: a modestly-filled page's real text just can't
+out-token a repeated instruction block plus a flat-rate high-res image
+encoding, regardless of how much was correctly read off the page.
+
+**Next actions:** (1) reopen the billing account before launching anything
+else against Vertex; (2) relaunch with lower `--workers`/`--doc-workers`
+given the OOM-kill; (3) `zcks` (514 docs) and the 6 unstarted
+`telegram_pertok_badini` docs are what's actually left to OCR.
