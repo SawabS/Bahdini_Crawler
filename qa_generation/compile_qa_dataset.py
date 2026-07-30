@@ -25,6 +25,7 @@ import json
 import sys
 from collections import Counter
 
+import gemma_tokenizer as gtok
 import qa_config as cfg
 
 # +/- allowance around the partner's ~1,000 token/record estimate before a
@@ -70,9 +71,11 @@ def build_record(chunk_text: str, pair: dict, generation: dict) -> dict:
     }
 
 
-def record_token_estimate(record: dict) -> int:
-    total_chars = sum(len(m["content"]) for m in record["messages"])
-    return max(1, round(total_chars / cfg.CHARS_PER_TOKEN))
+def record_token_count(record: dict) -> int:
+    """Real token count as the model will actually see it (chat-template
+    rendered, BOS + turn markers included) when the tokenizer is available;
+    falls back to the char-based estimate otherwise -- see gemma_tokenizer.py."""
+    return gtok.count_chat_tokens(record["messages"])
 
 
 def main() -> int:
@@ -84,6 +87,12 @@ def main() -> int:
 
     chunk_texts = load_chunk_texts()
     cfg.DATASET_DIR.mkdir(parents=True, exist_ok=True)
+
+    if gtok.available():
+        print(f"Using the real {cfg.GEMMA_TOKENIZER_MODEL} tokenizer for record token counts.")
+    else:
+        print(f"Real tokenizer unavailable; falling back to the "
+              f"{cfg.CHARS_PER_TOKEN} chars/token estimate.")
 
     records = []
     by_source = Counter()
@@ -105,7 +114,7 @@ def main() -> int:
             continue
         for pair in generation.get("qa_pairs", []):
             record = build_record(chunk_text, pair, generation)
-            token_estimate = record_token_estimate(record)
+            token_estimate = record_token_count(record)
             if token_estimate > RECORD_TOKEN_FLAG_THRESHOLD:
                 over_threshold += 1
             records.append(record)

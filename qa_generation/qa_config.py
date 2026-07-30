@@ -23,15 +23,24 @@ OCR_CORPUS_JSONL = OCR_CORPUS_DIR / "corpus.jsonl"
 
 # --- token estimation -------------------------------------------------
 #
-# No tokenizer is wired in here, so tokens are estimated from characters.
-# docs/CRAWL_REPORT.md's own numbers for the clean Bahdini pool (~43.8M
-# chars / ~8.6M words -> ~5.1 chars/word) combined with scripts/
-# token_estimate.py's rule of thumb for this corpus (~1.6 tokens/word for
-# Arabic-script Kurdish, which fragments more than Latin script under
-# byte-level BPE) give ~3.2 chars/token. Good enough for chunk sizing and
-# sanity-checking record length; re-derive from an actual Gemma/Gemini
-# tokenizer before trusting it for anything cost-critical.
-CHARS_PER_TOKEN = 3.2
+# gemma_tokenizer.py loads the actual google/gemma-4-31B-it tokenizer and is
+# what build_chunks.py and compile_qa_dataset.py use for real token counts --
+# this constant is only the fallback for when that tokenizer can't be
+# loaded (offline, gated repo not accepted, transformers not installed).
+#
+# It used to be a guessed 3.2 chars/token, derived from a generic
+# words/chars ratio. Measured directly against the real Gemma 4 tokenizer
+# over an 80-chunk random sample of this corpus, Bahdini Arabic-script text
+# actually comes out to ~1.6 chars/token -- it fragments much more than that
+# generic guess assumed, roughly 2x as many tokens for the same text. Keep
+# this close to that measurement; re-measure (see qa_generation/README.md)
+# if the tokenizer model changes.
+CHARS_PER_TOKEN = 1.6
+
+# HF repo for the real tokenizer (no model weights needed, just the
+# tokenizer files -- see gemma_tokenizer.py). Verify this id still points at
+# the intended checkpoint if it's ever re-downloaded.
+GEMMA_TOKENIZER_MODEL = "google/gemma-4-31B-it"
 
 
 def estimate_tokens(text: str) -> int:
@@ -42,8 +51,11 @@ def estimate_tokens(text: str) -> int:
 #
 # The partner side estimated ~1,000 tokens per finished QA record
 # (system + context + question + answer combined -- see the email thread).
-# Budget: ~20 tokens system, ~40 question, ~150 answer, leaving the context
-# chunk itself a target of ~700 tokens with headroom up to 850.
+# Measured with the real Gemma 4 chat template: the system prompt is 13
+# tokens and BOS+turn-marker overhead is ~16 tokens for a 3-message record,
+# so ~30 tokens of fixed overhead plus however long the question and answer
+# come out. That leaves the context chunk itself a target of ~700 tokens
+# (with headroom up to 850) comfortably inside the 1,000-token budget.
 TARGET_CHUNK_TOKENS = 700
 MAX_CHUNK_TOKENS = 850
 MIN_CHUNK_TOKENS = 120  # below this a chunk is too thin to ground a QA pair

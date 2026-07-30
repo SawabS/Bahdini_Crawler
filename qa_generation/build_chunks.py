@@ -31,6 +31,7 @@ import re
 import sys
 from collections import Counter
 
+import gemma_tokenizer as gtok
 import qa_config as cfg
 
 SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?؟۔।])\s+")
@@ -46,25 +47,35 @@ def split_paragraphs(text: str) -> list:
     return paragraphs
 
 
+def token_hard_cut(text: str, max_tokens: int) -> list:
+    """Last-resort cut for a "sentence" with no punctuation to split on.
+    Cuts on real token boundaries (encode -> slice ids -> decode) when the
+    tokenizer is available, so pieces are guaranteed <= max_tokens instead of
+    just approximately so; falls back to a character slice otherwise."""
+    ids = gtok.encode(text)
+    if ids is None:
+        max_chars = int(max_tokens * cfg.CHARS_PER_TOKEN)
+        return [text[start:start + max_chars] for start in range(0, len(text), max_chars)]
+    return [gtok.decode(ids[start:start + max_tokens]) for start in range(0, len(ids), max_tokens)]
+
+
 def hard_split(paragraph: str, max_tokens: int) -> list:
     """Split one oversized paragraph on sentence boundaries, falling back to
-    a hard character cut if a single "sentence" is still too long."""
+    a hard token/character cut if a single "sentence" is still too long."""
     sentences = [s for s in SENTENCE_SPLIT_RE.split(paragraph) if s.strip()]
     if not sentences:
         sentences = [paragraph]
+    sentence_tokens_list = gtok.count_tokens_batch(sentences)
 
     pieces = []
     current = []
     current_tokens = 0
-    max_chars = max_tokens * cfg.CHARS_PER_TOKEN
-    for sentence in sentences:
-        sentence_tokens = cfg.estimate_tokens(sentence)
+    for sentence, sentence_tokens in zip(sentences, sentence_tokens_list):
         if sentence_tokens > max_tokens:
             if current:
                 pieces.append(" ".join(current))
                 current, current_tokens = [], 0
-            for start in range(0, len(sentence), int(max_chars)):
-                pieces.append(sentence[start:start + int(max_chars)])
+            pieces.extend(token_hard_cut(sentence, max_tokens))
             continue
         if current and current_tokens + sentence_tokens > max_tokens:
             pieces.append(" ".join(current))
@@ -78,6 +89,10 @@ def hard_split(paragraph: str, max_tokens: int) -> list:
 
 def chunk_text(text: str, target_tokens: int, max_tokens: int, min_tokens: int) -> list:
     paragraphs = split_paragraphs(text)
+    if not paragraphs:
+        return []
+    para_tokens_list = gtok.count_tokens_batch(paragraphs)
+
     chunks = []
     current = []
     current_tokens = 0
@@ -86,8 +101,7 @@ def chunk_text(text: str, target_tokens: int, max_tokens: int, min_tokens: int) 
         if current:
             chunks.append("\n\n".join(current))
 
-    for para in paragraphs:
-        para_tokens = cfg.estimate_tokens(para)
+    for para, para_tokens in zip(paragraphs, para_tokens_list):
         if para_tokens > max_tokens:
             flush()
             current, current_tokens = [], 0
@@ -102,13 +116,17 @@ def chunk_text(text: str, target_tokens: int, max_tokens: int, min_tokens: int) 
 
     # merge a too-thin trailing fragment into its predecessor rather than
     # shipping a chunk that can't ground a QA pair on its own
+    chunk_tokens_list = gtok.count_tokens_batch(chunks)
     merged = []
-    for chunk in chunks:
-        if merged and cfg.estimate_tokens(chunk) < min_tokens:
+    merged_tokens = []
+    for chunk, chunk_tokens in zip(chunks, chunk_tokens_list):
+        if merged and chunk_tokens < min_tokens:
             merged[-1] = merged[-1] + "\n\n" + chunk
+            merged_tokens[-1] = gtok.count_tokens(merged[-1])
         else:
             merged.append(chunk)
-    return [c for c in merged if cfg.estimate_tokens(c) >= min_tokens]
+            merged_tokens.append(chunk_tokens)
+    return [c for c, t in zip(merged, merged_tokens) if t >= min_tokens]
 
 
 def discover_safe_docs() -> list:
@@ -192,6 +210,12 @@ def main() -> int:
         sys.exit("No source documents found under extractions/*/safe/ or "
                   f"{cfg.OCR_CORPUS_DIR}; nothing to chunk.")
 
+    if gtok.available():
+        print(f"Using the real {cfg.GEMMA_TOKENIZER_MODEL} tokenizer for token counts.")
+    else:
+        print(f"Real tokenizer unavailable; falling back to the "
+              f"{cfg.CHARS_PER_TOKEN} chars/token estimate.")
+
     cfg.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     by_source = Counter()
     by_origin = Counter()
@@ -206,8 +230,8 @@ def main() -> int:
             if not chunks:
                 skipped_empty += 1
                 continue
-            for i, chunk in enumerate(chunks):
-                token_estimate = cfg.estimate_tokens(chunk)
+            for i, (chunk, token_estimate) in enumerate(
+                    zip(chunks, gtok.count_tokens_batch(chunks))):
                 record = {
                     "chunk_id": f"{doc['document_id']}-{i:03d}",
                     "document_id": doc["document_id"],
