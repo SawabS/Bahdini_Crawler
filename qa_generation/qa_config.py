@@ -103,7 +103,7 @@ CONTEXT_RATIO = 0.7
 # about that envelope.
 QUESTION_TYPES = ["factual", "explanatory", "summarization", "definitional", "inferential"]
 
-QA_PROMPT_VERSION = "v2"
+QA_PROMPT_VERSION = "v3"
 QA_SYSTEM_PROMPT = "Answer the question in Bahdini Kurdish using the supplied context."
 # Used instead of QA_SYSTEM_PROMPT for the CONTEXT_RATIO-share of records
 # delivered without a context block, since "using the supplied context"
@@ -115,18 +115,18 @@ QA_SYSTEM_PROMPT_NO_CONTEXT = "Answer the question in Bahdini Kurdish."
 PAIRS_PER_CHUNK = 3
 
 QA_GENERATION_PROMPT_TEMPLATE = (
-    "You are building instruction-tuning data for a Bahdini (Badini) Kurdish "
-    "language model. Bahdini is the Kurmanji dialect written in Arabic "
-    "script, spoken in the Duhok/Badinan region.\n"
+    "You are building instruction-tuning data for a 100% pure Bahdini (Badini) Kurdish "
+    "language model. Bahdini is spoken by people in Dohuk city and governorate.\n"
     "\n"
     "Below is one excerpt (\"the context\") from a Bahdini text. Write "
     "{n_pairs} question-answer pairs a person could ask about this excerpt, "
     "as if using it for reading comprehension / instruction fine-tuning.\n"
     "\n"
     "Rules:\n"
-    "- Both the question and the answer must be written in Bahdini Kurdish, "
-    "in the same orthography as the context (do not switch to Sorani, "
-    "Latin-script Kurdish, or Arabic).\n"
+    "- CRITICAL DIALECT RULE: Both the question and the answer MUST be written in 100% pure "
+    "Bahdini Kurdish (Arabic script) exactly as spoken in Dohuk. Do NOT mix in any Sorani "
+    "words, phrases, or grammar. Do NOT use general Kurmanji vocabulary or Latin script. "
+    "You must ensure the dialect is strictly pure Bahdini.\n"
     "- The answer must be grounded in the context: prefer extractive answers "
     "quoting or closely paraphrasing the text; reasonable inference/synthesis "
     "is fine for explanatory or summarization questions, but never introduce "
@@ -141,7 +141,7 @@ QA_GENERATION_PROMPT_TEMPLATE = (
     "- If answering the question genuinely requires connecting multiple "
     "details in the context or drawing a conclusion beyond a single stated "
     "fact, also fill in \"reasoning\": a brief step-by-step justification, "
-    "in Bahdini Kurdish, for how the answer follows from the context. If "
+    "in pure Bahdini Kurdish, for how the answer follows from the context. If "
     "the question is directly answerable by quoting or restating one "
     "explicit fact, set \"reasoning\" to null; do not pad it with filler.\n"
     "\n"
