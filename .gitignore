@@ -32,6 +32,9 @@ document_ai_sample/
 # Gemini OCR pipeline artifacts: queue, page records, images, compiled corpus
 gemini_ocr_pipeline/output/
 
+# QA-generation pipeline artifacts: chunk queue, generation records, compiled dataset
+qa_generation/output/
+
 .env
 graphify-out
 CLAUDE.md
