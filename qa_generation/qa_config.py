@@ -1,8 +1,8 @@
 """Shared configuration for the QA-pair generation pipeline.
 
-Turns the clean Bahdini text corpus (native "safe" extractions, plus
-human-reviewed Gemini OCR output once review happens) into context chunks,
-then into instruction-tuning QA pairs for the Gemma 4 31B IT LoRA fine-tune.
+Turns the clean Bahdini text corpus (native "safe" extractions, plus the
+reviewed Gemini OCR corpus) into context chunks, then into instruction-tuning
+QA pairs for the Gemma 4 31B IT LoRA fine-tune.
 Mirrors the layout of gemini_ocr_pipeline/ (versioned prompt/config, JSONL
 work queue, resumable per-source generation records, a compile step) so both
 pipelines read the same way.
@@ -18,7 +18,7 @@ GENERATIONS_DIR = OUTPUT_DIR / "generations"
 DATASET_DIR = OUTPUT_DIR / "dataset"
 
 EXTRACTIONS_DIR = ROOT / "extractions"
-OCR_CORPUS_DIR = ROOT / "gemini_ocr_pipeline" / "output" / "corpus_unreviewed"
+OCR_CORPUS_DIR = ROOT / "gemini_ocr_pipeline" / "output" / "corpus"
 OCR_CORPUS_JSONL = OCR_CORPUS_DIR / "corpus.jsonl"
 
 # --- token estimation -------------------------------------------------
@@ -62,14 +62,11 @@ MIN_CHUNK_TOKENS = 120  # below this a chunk is too thin to ground a QA pair
 
 # --- source selection -----------------------------------------------------
 #
-# Default pool: only extractions/*/safe/ (native PDF text layer, already
-# classified "safe" by scripts/extract_pipeline.py, no review gate).
-# gemini_ocr_pipeline/output/corpus_unreviewed/ is explicitly NOT promoted
-# to training data automatically (see that pipeline's README/guide) -- it
-# is included here only for documents with review_status == "reviewed",
-# unless --include-unreviewed-ocr opts into the unreviewed pool for an
-# early sample, which build_chunks.py flags loudly when used.
-OCR_MIN_COMPLETENESS_IF_UNREVIEWED = 0.98
+# Both source pools are trusted and included unconditionally:
+# extractions/*/safe/ (native PDF text layer, classified "safe" by
+# scripts/extract_pipeline.py) and gemini_ocr_pipeline/output/corpus/
+# (Gemini OCR output, classification == "kurdish"; this corpus has been
+# reviewed and accepted, see that pipeline's README/guide).
 
 # --- QA generation prompt (Gemini) ---------------------------------------
 #

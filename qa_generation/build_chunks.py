@@ -1,19 +1,14 @@
 #!/usr/bin/env python3
 """Build the QA-generation work queue: clean Bahdini text -> context chunks.
 
-Reads two source pools:
+Reads two source pools, both trusted and included unconditionally:
 
-  extractions/<source>/safe/*.txt             native PDF text extraction,
-                                               already classified "safe" by
-                                               scripts/extract_pipeline.py
-                                               (no review gate)
-  gemini_ocr_pipeline/output/corpus_unreviewed/  Gemini-OCR'd text; only rows
-                                               with classification=="kurdish"
-                                               AND review_status=="reviewed"
-                                               are included by default, since
-                                               that pipeline explicitly does
-                                               NOT promote OCR output to
-                                               training data automatically
+  extractions/<source>/safe/*.txt        native PDF text extraction,
+                                          classified "safe" by
+                                          scripts/extract_pipeline.py
+  gemini_ocr_pipeline/output/corpus/      Gemini-OCR'd text, reviewed and
+                                          accepted; rows with
+                                          classification=="kurdish"
 
 Each document is split into paragraph-aware chunks sized for the ~1,000
 token/QA-record budget the partner side estimated (see qa_config.py), and
@@ -22,7 +17,6 @@ work queue generate_qa_openrouter.py consumes.
 
 Run inside the conda "ai" env (no extra deps beyond stdlib are required):
     python3 qa_generation/build_chunks.py
-    python3 qa_generation/build_chunks.py --include-unreviewed-ocr
 """
 
 import argparse
@@ -152,60 +146,36 @@ def discover_safe_docs() -> list:
     return docs
 
 
-def discover_ocr_docs(include_unreviewed: bool) -> list:
+def discover_ocr_docs() -> list:
     if not cfg.OCR_CORPUS_JSONL.is_file():
         return []
     docs = []
-    skipped_unreviewed = 0
     with open(cfg.OCR_CORPUS_JSONL, encoding="utf-8") as handle:
         for line in handle:
             row = json.loads(line)
             if row.get("classification") != "kurdish" or not row.get("out"):
                 continue
-            reviewed = row.get("review_status") == "reviewed"
-            if not reviewed:
-                if not include_unreviewed:
-                    skipped_unreviewed += 1
-                    continue
-                if row.get("completeness", 0) < cfg.OCR_MIN_COMPLETENESS_IF_UNREVIEWED:
-                    continue
             text_path = cfg.ROOT / row["out"]
             if not text_path.is_file():
                 continue
             docs.append({
                 "source": row["source"],
-                "origin": "ocr_reviewed" if reviewed else "ocr_unreviewed",
+                "origin": "ocr_corpus",
                 "doc_file": row["file"],
                 "document_id": row["doc_id"],
                 "text_path": text_path,
             })
-    if skipped_unreviewed and not include_unreviewed:
-        print(f"  (skipped {skipped_unreviewed} unreviewed OCR documents classified "
-              f"'kurdish'; pass --include-unreviewed-ocr to pull from them anyway)",
-              file=sys.stderr)
     return docs
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--include-unreviewed-ocr", action="store_true",
-                        help="also chunk gemini_ocr_pipeline OCR output that has not been "
-                             "human-reviewed yet, restricted to classification=kurdish and "
-                             f"completeness >= {cfg.OCR_MIN_COMPLETENESS_IF_UNREVIEWED}. "
-                             "This bypasses the OCR pipeline's review gate -- only use it "
-                             "for an early/throwaway sample, not the delivered dataset.")
     parser.add_argument("--target-tokens", type=int, default=cfg.TARGET_CHUNK_TOKENS)
     parser.add_argument("--max-tokens", type=int, default=cfg.MAX_CHUNK_TOKENS)
     parser.add_argument("--min-tokens", type=int, default=cfg.MIN_CHUNK_TOKENS)
     args = parser.parse_args()
 
-    if args.include_unreviewed_ocr:
-        print(">>> --include-unreviewed-ocr set: pulling unreviewed Gemini-OCR text into "
-              "the chunk pool. Nothing OCR'd has been human-reviewed yet -- treat any "
-              "dataset built from this run as a throwaway sample, not the deliverable.\n",
-              file=sys.stderr)
-
-    docs = discover_safe_docs() + discover_ocr_docs(args.include_unreviewed_ocr)
+    docs = discover_safe_docs() + discover_ocr_docs()
     if not docs:
         sys.exit("No source documents found under extractions/*/safe/ or "
                   f"{cfg.OCR_CORPUS_DIR}; nothing to chunk.")

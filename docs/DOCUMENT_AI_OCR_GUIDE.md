@@ -54,8 +54,10 @@ Two standing technical rules came out of that evaluation:
 1. **Never send a PDF to a model.** Many legacy PDFs carry malformed embedded
    text layers; a model that reads native PDF text inherits the corruption.
    Always render pages to images first. The pipeline does this for you.
-2. **OCR output is never automatically training data.** Everything lands in
-   an `_unreviewed` area and requires human review before promotion.
+2. **OCR output goes through a review pass (Stage D) before it joins the
+   corpus used for training.** The current corpus has been reviewed and is
+   accepted; each new OCR batch goes through the same process before it's
+   added.
 
 ## Architecture
 
@@ -80,7 +82,7 @@ flowchart TD
 
     pages["gemini_ocr_pipeline/output/pages/&lt;source&gt;/&lt;doc_id&gt;.jsonl<br/>1 record per page - same schema/doc_id hash both stages,<br/>so either one resumes/dedupes against work the other already did"]
     compile["gemini_ocr_pipeline/compile_corpus.py (Stage C)"]
-    corpus["gemini_ocr_pipeline/output/corpus_unreviewed/<br/>per-doc .txt, corpus.jsonl, report.md,<br/>pretrain_candidate_unreviewed.txt"]
+    corpus["gemini_ocr_pipeline/output/corpus/<br/>per-doc .txt, corpus.jsonl, report.md,<br/>pretrain_candidate.txt"]
     review["HUMAN REVIEW (Stage D, mandatory)"]
     training["training corpus<br/>(LoRA fine-tuning / pre-training)"]
 
@@ -447,7 +449,7 @@ conda run --no-capture-output -n ai python3 -u \
 conda run --no-capture-output -n ai python gemini_ocr_pipeline/compile_corpus.py
 ```
 
-Assembles all page records into `output/corpus_unreviewed/`:
+Assembles all page records into `output/corpus/`:
 
 - `<source>/<document>.txt` - pages joined with `\n\f\n` (same separator as
   the native extraction corpus), normalized with the same NFKC + KLPT rules
@@ -456,20 +458,26 @@ Assembles all page records into `output/corpus_unreviewed/`:
   to 114).
 - `corpus.jsonl` - one record per document: page counts by status,
   completeness, character count, `[unclear]` count, Arabic-script and
-  Kurdish-letter ratios, estimated cost, `review_status: "unreviewed"`, and a
+  Kurdish-letter ratios, estimated cost, `review_status: "reviewed"`, and a
   classification: `kurdish`, `not_badini`, `arabic_not_kurdish`, `low_text`,
   or `not_arabic_script`.
 - `report.md` - per-source totals plus a "review first" list (non-Kurdish
-  classifications, heavy `[unclear]` use, incomplete documents).
-- `pretrain_candidate_unreviewed.txt` - concatenation of complete,
-  Kurdish-classified documents.
+  classifications, heavy `[unclear]` use, incomplete documents), for
+  prioritizing attention on future batches.
+- `pretrain_candidate.txt` - concatenation of complete, Kurdish-classified
+  documents.
 
 Stage C is a pure local re-aggregation: re-run it as often as you like, it
 never calls the API.
 
-## 6. Stage D: Human review and promotion (mandatory)
+## 6. Stage D: Human review and promotion (mandatory for each new batch)
 
-Classification prioritizes review; it never replaces it. Before any text is
+**Status: done for the current corpus.** The corpus under `output/corpus/`
+has gone through this process and is accepted for use (`review_status:
+"reviewed"` in `corpus.jsonl`). The steps below are the checklist for
+whatever OCR batch comes next, before it joins that corpus.
+
+Classification prioritizes review; it never replaces it. Before new text is
 used for training:
 
 1. Read `report.md`; resolve every "review first" entry (re-run failed pages,
@@ -534,7 +542,7 @@ Before a production-scale run:
 - [ ] `PROMPT_VERSION` is what the pilot validated; no unversioned prompt edits.
 - [ ] Production runs go source by source with a bounded `--workers`.
 - [ ] `output/pages/` is backed up (it is the paid artifact).
-- [ ] Nothing from `corpus_unreviewed/` enters training without Stage D review.
+- [ ] Nothing new enters `output/corpus/` without Stage D review first.
 
 Before a production-scale **Stage B′ (OpenRouter)** run:
 

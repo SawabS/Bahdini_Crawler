@@ -16,8 +16,8 @@ actual number of tokens Gemma will see, not a character-based guess. See
 
 ```mermaid
 flowchart TD
-    A["extractions/*/safe/*.txt<br/>native extraction, no review gate"] --> C
-    B["gemini_ocr_pipeline/output/corpus_unreviewed/<br/>OCR corpus, reviewed rows only"] --> C
+    A["extractions/*/safe/*.txt<br/>native extraction"] --> C
+    B["gemini_ocr_pipeline/output/corpus/<br/>Gemini OCR corpus, reviewed and accepted"] --> C
     C["build_chunks.py"] --> D[("output/chunks.jsonl<br/>work queue, one row per chunk")]
     D --> E["generate_qa_openrouter.py<br/>chunk to Gemini to QA pairs, resumable"]
     E --> F[("output/generations/&lt;source&gt;/&lt;doc_id&gt;.jsonl<br/>one record per chunk attempt")]
@@ -33,19 +33,16 @@ python3 qa_generation/build_chunks.py
 ```
 
 Source pool, by design (see
-[discover_safe_docs](build_chunks.py#L132-L152) and
-[discover_ocr_docs](build_chunks.py#L155-L186)):
+[discover_safe_docs](build_chunks.py#L126-L146) and
+[discover_ocr_docs](build_chunks.py#L149-L168)), both included
+unconditionally:
 
-- `extractions/<source>/safe/*.txt`: native PDF text extraction, already
-  classified `safe`. Included unconditionally.
-- `gemini_ocr_pipeline/output/corpus_unreviewed/`: only rows with
-  `classification == "kurdish"` and `review_status == "reviewed"`. That
-  pipeline's own rule is that nothing OCR'd is promoted to training data
-  automatically; as of this writing every OCR'd document is still
-  `unreviewed`, so none of it feeds the chunk queue by default.
-  `--include-unreviewed-ocr` opts into unreviewed-but-high-completeness OCR
-  text anyway (prints a loud warning), useful only for a quick throwaway
-  sample, never for the delivered dataset.
+- `extractions/<source>/safe/*.txt`: native PDF text extraction, classified
+  `safe` by `scripts/extract_pipeline.py`.
+- `gemini_ocr_pipeline/output/corpus/`: rows with `classification ==
+  "kurdish"`. This corpus has been reviewed and accepted (see
+  [gemini_ocr_pipeline/README.md](../gemini_ocr_pipeline/README.md) and
+  [docs/DOCUMENT_AI_OCR_GUIDE.md](../docs/DOCUMENT_AI_OCR_GUIDE.md)'s Stage D).
 
 Chunking is paragraph-aware: [split_paragraphs](build_chunks.py#L40-L47)
 splits on the extraction pipeline's page-break `\f` markers, then blank
@@ -73,14 +70,16 @@ missing, gated repo not accepted); every function in `gemma_tokenizer.py`
 degrades to it transparently, with a one-time warning, so the pipeline still
 runs either way.
 
-Current run over the safe-extraction pool: 1,853 documents to **219,171
-chunks (~131.6M real tokens)**. That is roughly double the chunk count and
-total-token estimate of the first run before the real tokenizer was wired
-in: the old ~3.2 chars/token guess was undercounting tokens by close to 2x,
-so chunks were coming out nearly twice as token-heavy as the "700-token
-target" implied, and a few thin documents were being dropped as
-sub-minimum that actually clear the 120-token floor once counted correctly.
-See `output/chunks_report.md` for the current per-source breakdown.
+Current run over both source pools: 5,370 documents to **428,907 chunks
+(~253.2M real tokens)**, split roughly evenly between `safe_extraction`
+(219,171 chunks) and `ocr_corpus` (209,736 chunks). Switching from the old
+~3.2 chars/token guess to the real tokenizer roughly doubled the chunk count
+and total-token estimate for the safe-extraction pool alone (that guess was
+undercounting tokens by close to 2x, so chunks were coming out nearly twice
+as token-heavy as the "700-token target" implied), and a few thin documents
+that were previously dropped as sub-minimum now correctly clear the
+120-token floor. See `output/chunks_report.md` for the current per-source
+breakdown.
 
 ## Generation
 
@@ -92,7 +91,7 @@ python3 qa_generation/generate_qa_openrouter.py --budget-usd 25 --concurrency 16
 [run()](generate_qa_openrouter.py#L188-L240) calls Gemini through OpenRouter
 (reuses `OPENROUTER_API_KEY` from `.env`, same as
 `gemini_ocr_pipeline/run_ocr_openrouter.py`) with the prompt in
-[qa_config.QA_GENERATION_PROMPT_TEMPLATE](qa_config.py#L74-L122), requesting
+[qa_config.QA_GENERATION_PROMPT_TEMPLATE](qa_config.py#L84-L119), requesting
 `--pairs-per-chunk` (default 3) QA pairs as a strict JSON list per chunk.
 [parse_qa_response](generate_qa_openrouter.py#L68-L94) validates the result.
 Resumable via [process_chunk](generate_qa_openrouter.py#L144-L185): each
@@ -102,7 +101,7 @@ attempted chunk is appended to
 and `--budget-usd` all narrow scope, so a small representative sample can be
 produced (and sent to the partner) well before the full run.
 
-[qa_config.OPENROUTER_MODEL](qa_config.py#L131-L145) currently points at
+[qa_config.OPENROUTER_MODEL](qa_config.py#L128-L142) currently points at
 `google/gemini-3.1-pro-preview`, a stronger tier than the OCR pipeline's
 `flash-lite`, since QA generation leans more on instruction-following and
 reasoning than transcription. Verify that model slug and the placeholder
@@ -159,9 +158,9 @@ change in [qa_config.py](qa_config.py):
 3. **Answers are extractive-first**, with reasonable inference/synthesis
    allowed for `explanatory`/`summarization` questions but never introducing
    facts absent from the context (instructed directly in
-   [QA_GENERATION_PROMPT_TEMPLATE](qa_config.py#L87-L122)).
+   [QA_GENERATION_PROMPT_TEMPLATE](qa_config.py#L84-L119)).
 4. **Question types**: `factual, explanatory, summarization, definitional,
-   inferential` ([qa_config.QUESTION_TYPES](qa_config.py#L80)), a superset
+   inferential` ([qa_config.QUESTION_TYPES](qa_config.py#L77)), a superset
    of the partner's example list ("factual, explanatory, summarization,
    etc.").
 

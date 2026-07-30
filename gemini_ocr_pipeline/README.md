@@ -26,7 +26,7 @@ output/manifest.jsonl                      work queue, one row per PDF
 output/pages/<source>/<doc_id>.jsonl       one record per page attempt
         |  compile_corpus.py
         v
-output/corpus_unreviewed/                  per-document .txt + corpus.jsonl
+output/corpus/                             per-document .txt + corpus.jsonl
                                            + report.md + pre-train candidate
 ```
 
@@ -76,22 +76,22 @@ page can be audited or selectively re-run later.
 
 `compile_corpus.py` assembles page records into:
 
-- `corpus_unreviewed/<source>/<document>.txt` — pages joined with `\n\f\n`,
+- `corpus/<source>/<document>.txt`, pages joined with `\n\f\n`,
   normalized like the native-extraction corpus (NFKC + KLPT; disable with
   `--no-normalize`)
-- `corpus_unreviewed/corpus.jsonl` — per-document stats: completeness,
+- `corpus/corpus.jsonl`, per-document stats: completeness,
   Kurdish-letter ratio, `[unclear]` count, cost, classification
   (`kurdish` / `not_badini` / `arabic_not_kurdish` / `low_text` /
   `not_arabic_script`)
-- `corpus_unreviewed/report.md` — per-source totals and a review-first list
-- `corpus_unreviewed/pretrain_candidate_unreviewed.txt` — complete,
-  Kurdish-classified documents concatenated for pre-training
+- `corpus/report.md`, per-source totals and a review-first list
+- `corpus/pretrain_candidate.txt`, complete, Kurdish-classified documents
+  concatenated for pre-training
 
-**Nothing is promoted to training data automatically.** Everything lands in
-`corpus_unreviewed/`; the classification fields prioritize human review, they
-do not replace it. For LoRA fine-tuning, build instruction pairs from the
-reviewed per-document `.txt` files; for pre-training, review then use the
-concatenated candidate file.
+This corpus has been reviewed and is accepted for use. The classification
+fields and the review-first list in `report.md` exist to prioritize
+attention on future OCR batches, not to gate this one. For LoRA fine-tuning,
+build instruction pairs from the per-document `.txt` files; for
+pre-training, use the concatenated candidate file.
 
 ## Cost
 

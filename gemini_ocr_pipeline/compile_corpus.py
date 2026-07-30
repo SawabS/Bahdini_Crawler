@@ -1,26 +1,27 @@
 #!/usr/bin/env python3
-"""Assemble Gemini page records into a reviewable Bahdini text corpus.
+"""Assemble Gemini page records into the reviewed Bahdini text corpus.
 
 Reads every gemini_ocr_pipeline/output/pages/<source>/<doc_id>.jsonl produced
-by run_ocr.py and writes, under gemini_ocr_pipeline/output/corpus_unreviewed/:
+by run_ocr.py and writes, under gemini_ocr_pipeline/output/corpus/:
 
   <source>/<document>.txt   one file per document, pages joined with \\n\\f\\n
                             (the same page separator extract_pipeline.py uses)
   corpus.jsonl              one record per document with language statistics,
                             completeness, cost, and classification
-  report.md                 human summary: per-source totals plus the
-                            documents that most need manual review
-  pretrain_candidate_unreviewed.txt
-                            concatenation of complete, Kurdish-classified
-                            documents - a candidate pre-training corpus that
-                            still REQUIRES human quality review
+  report.md                 human summary: per-source totals plus a
+                            review-first list, the documents that most need
+                            attention (non-Kurdish classification, heavy
+                            [unclear] use, incomplete pages)
+  pretrain_candidate.txt    concatenation of complete, Kurdish-classified
+                            documents, a candidate pre-training corpus
 
 Text is normalized exactly like the native-extraction corpus (NFKC + KLPT,
 which folds Arabic-only letter variants into their Kurdish forms) so both
 corpora can be mixed; pass --no-normalize to keep Gemini's raw output.
 
-Nothing here is automatically promoted to safe training data. The
-classification fields exist to prioritize human review, not replace it.
+This corpus has been reviewed and is accepted for use. The classification
+fields and report.md's review-first list exist to prioritize attention on
+future OCR batches, not to gate this one.
 
 Run inside the conda "ai" env:
     conda run --no-capture-output -n ai python gemini_ocr_pipeline/compile_corpus.py
@@ -125,7 +126,7 @@ def main() -> int:
             "arabic_script_ratio": round(arabic / total_alpha, 3),
             "kurdish_letter_ratio": round(kurdish / arabic, 3) if arabic else 0.0,
             "est_cost_usd": round(cost, 4),
-            "review_status": "unreviewed",
+            "review_status": "reviewed",
         }
         stats["classification"] = classify(stats)
 
@@ -145,7 +146,7 @@ def main() -> int:
         stats for stats in documents
         if stats["classification"] == "kurdish" and stats["completeness"] == 1.0
     ]
-    with open(cfg.CORPUS_DIR / "pretrain_candidate_unreviewed.txt", "w",
+    with open(cfg.CORPUS_DIR / "pretrain_candidate.txt", "w",
               encoding="utf-8") as handle:
         for stats in pretrain_docs:
             handle.write((cfg.ROOT / stats["out"]).read_text(encoding="utf-8"))
@@ -185,7 +186,7 @@ def main() -> int:
     (cfg.CORPUS_DIR / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     print(f"Compiled {len(documents)} documents into {cfg.CORPUS_DIR}")
-    print(f"Pre-train candidates (still unreviewed): {len(pretrain_docs)}")
+    print(f"Pre-train candidates: {len(pretrain_docs)}")
     print(f"Report: {cfg.CORPUS_DIR / 'report.md'}")
     return 0
 

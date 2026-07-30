@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_DIR = ROOT / "gemini_ocr_pipeline" / "output"
 MANIFEST_PATH = OUTPUT_DIR / "manifest.jsonl"
 PAGES_DIR = OUTPUT_DIR / "pages"
-CORPUS_DIR = OUTPUT_DIR / "corpus_unreviewed"
+CORPUS_DIR = OUTPUT_DIR / "corpus"
 
 PROJECT = "bahdini-data"
 VERTEX_LOCATION = "global"
