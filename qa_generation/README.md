@@ -20,7 +20,7 @@ flowchart TD
     B["gemini_ocr_pipeline/output/corpus/<br/>Gemini OCR corpus, reviewed and accepted"] --> C
     C["build_chunks.py"] --> D[("output/chunks.jsonl<br/>work queue, one row per chunk")]
     D --> E["generate_qa_openrouter.py<br/>chunk to Gemini to QA pairs, resumable"]
-    E --> F[("output/generations/&lt;source&gt;/&lt;doc_id&gt;.jsonl<br/>one record per chunk attempt")]
+    E --> F[("output/generations/&lt;source&gt;/&lt;origin&gt;-&lt;doc_id&gt;.jsonl<br/>one record per chunk attempt")]
     F --> G["compile_qa_dataset.py"]
     G --> H[("output/dataset/qa_pairs.jsonl<br/>final messages+metadata JSONL")]
     G --> I[("output/dataset/sample.jsonl<br/>first N records, for partner review")]
@@ -33,8 +33,8 @@ python3 qa_generation/build_chunks.py
 ```
 
 Source pool, by design (see
-[discover_safe_docs](build_chunks.py#L126-L146) and
-[discover_ocr_docs](build_chunks.py#L149-L168)), both included
+[discover_safe_docs](build_chunks.py#L129-L151) and
+[discover_ocr_docs](build_chunks.py#L152-L173)), both included
 unconditionally:
 
 - `extractions/<source>/safe/*.txt`: native PDF text extraction, classified
@@ -44,12 +44,12 @@ unconditionally:
   [gemini_ocr_pipeline/README.md](../gemini_ocr_pipeline/README.md) and
   [docs/DOCUMENT_AI_OCR_GUIDE.md](../docs/DOCUMENT_AI_OCR_GUIDE.md)'s Stage D).
 
-Chunking is paragraph-aware: [split_paragraphs](build_chunks.py#L34-L41)
+Chunking is paragraph-aware: [split_paragraphs](build_chunks.py#L37-L46)
 splits on the extraction pipeline's page-break `\f` markers, then blank
-lines. [chunk_text](build_chunks.py#L84-L123) then greedily packs paragraphs
+lines. [chunk_text](build_chunks.py#L87-L128) then greedily packs paragraphs
 up to [qa_config.TARGET_CHUNK_TOKENS](qa_config.py#L50-L63) (900, cap 1050,
-floor 120), and [hard_split](build_chunks.py#L56-L81) with
-[token_hard_cut](build_chunks.py#L44-L53) handle the rare oversized
+floor 120), and [hard_split](build_chunks.py#L59-L86) with
+[token_hard_cut](build_chunks.py#L47-L58) handle the rare oversized
 paragraph. Sized so the *prompt* side of a QA record (system + question +
 context) lands near the partner's ~1,000-token mean; see "Confirmed with the
 partner" below for why the answer isn't part of that budget.
@@ -60,8 +60,8 @@ no model weights needed, just the tokenizer files) and every
 chunk/paragraph/sentence is tokenized for real while packing, via
 [count_tokens_batch](gemma_tokenizer.py#L66-L74) so a full run over the
 corpus takes a few minutes (batched per document, see
-[build_chunks.py main()](build_chunks.py#L171-L238)). This replaced an
-earlier char-based estimate ([qa_config.CHARS_PER_TOKEN](qa_config.py#L24-L38))
+[build_chunks.py main()](build_chunks.py#L174-L260)). This replaced an
+earlier char-based estimate ([qa_config.CHARS_PER_TOKEN](qa_config.py#L24-L49))
 that assumed ~3.2 chars/token from a generic words/chars rule of thumb;
 measured against the real tokenizer, Bahdini Arabic-script text actually
 runs **~1.6 chars/token**, roughly twice as dense as that guess assumed.
@@ -71,13 +71,67 @@ missing, gated repo not accepted); every function in `gemma_tokenizer.py`
 degrades to it transparently, with a one-time warning, so the pipeline still
 runs either way.
 
-Current run over both source pools: 5,370 documents to **338,350 chunks
-(~253.4M real tokens)**, split roughly evenly between `safe_extraction`
-(172,155 chunks) and `ocr_corpus` (166,195 chunks). Same total token volume
-as chunking at the old 700/850 target, just packed into fewer, larger
-chunks now that the confirmed budget gives context ~900 tokens of room
-instead of 700 (see "Confirmed with the partner" below). See
-`output/chunks_report.md` for the current per-source breakdown.
+## Text-quality gate: legacy-font corruption
+
+Chunking alone doesn't verify a document is actually meaningful text --
+that was inherited from `extract_pipeline.py`'s document-level classifier,
+and turned out not to hold for a large slice of the `safe_extraction` pool.
+Random inspection of real chunks found documents like
+`telegram_pertok_badini/چارینەیێن+بابا+طاهری.pdf` producing pure
+character soup:
+
+```text
+ل ل ل ل / م & م & م & م & / S* S* S* S*
+```
+
+The manifest for that document shows `presentation_form_ratio: 0.078` and
+plausible Kurdish-letter counts -- `extract_pipeline.py`'s corruption check
+(>20% Unicode presentation forms) doesn't catch this class of problem at
+all, because it's a legacy Kurdish font substituting the *wrong* Unicode
+characters entirely, not presentation-form variants. The letter-frequency
+statistics still look like real Kurdish; the character sequence doesn't
+spell real words.
+
+What actually separates it cleanly: the real Gemma tokenizer's chars/token
+on a document's own chunks. The already-reviewed `ocr_corpus` pool (verified
+clean by inspection, since Gemini transcribes from the rendered page image
+rather than trusting the PDF's font) sits overwhelmingly at 1.9-2.2
+chars/token; the corrupted `safe_extraction` documents sit at 1.0-1.5,
+matching known garbled examples measured directly (1.18, 1.46) against
+known clean ones (1.94). A per-chunk check on this was tried first and
+rejected: one genuinely garbled document had individual chunks ranging from
+0.12 to 0.52 purely from line-wrapping noise, so a per-chunk cutoff would
+have let a lot of it through. The per-document **median** across a
+document's own chunks is what actually separates cleanly, so
+[qa_config.MIN_DOC_CHARS_PER_TOKEN](qa_config.py#L65-L81) (1.5) gates whole
+documents in [build_chunks.py main()](build_chunks.py#L209-L215), reusing
+the token counts already computed for chunk sizing -- no extra tokenizer
+calls.
+
+Current run over both source pools, gate applied: 5,370 documents seen,
+**369 skipped as likely corrupted** (almost all `safe_extraction` -- see the
+per-source breakdown in `output/chunks_report.md`), producing **254,872
+chunks (~189.1M real tokens)** from the survivors, split `ocr_corpus`
+166,169 / `safe_extraction` 88,703.
+
+**A second, separate bug turned up while verifying this fix:** `document_id`
+is intentionally the same across both pools for the same underlying file
+(`qa_config.doc_id` and `gemini_ocr_pipeline`'s `ocr_config.doc_id` use the
+same hash on purpose, "so ids line up across pipelines"). That's fine on its
+own, but 626 documents genuinely exist in *both* pools (the OCR pipeline
+re-transcribes some "safe"-sources for consistency, per its own README), and
+`chunk_id` used to be built from `document_id` alone -- so for those 626
+documents, a `safe_extraction` chunk and an `ocr_corpus` chunk could end up
+with the identical `chunk_id`. That would have silently corrupted
+`compile_qa_dataset.py`'s chunk-text lookup (a plain `dict` keyed by
+`chunk_id`) and `generate_qa_openrouter.py`'s resumability tracking (both
+origins' generation attempts landing in the same per-document file). Found
+by checking chunk_ids for collisions after the quality-gate rebuild: **41,457
+colliding ids across 82,914 chunks, 32.5% of the whole queue.** Fixed by
+including `origin` in both the chunk_id (`build_chunks.py` line 219) and the
+per-document generation file name (`output/generations/<source>/<origin>-<document_id>.jsonl`,
+`generate_qa_openrouter.py`); verified zero collisions in the current
+254,872-chunk file.
 
 ## Generation
 
@@ -89,20 +143,20 @@ python3 qa_generation/generate_qa_openrouter.py --budget-usd 25 --concurrency 16
 [run()](generate_qa_openrouter.py#L193-L245) calls Gemini through OpenRouter
 (reuses `OPENROUTER_API_KEY` from `.env`, same as
 `gemini_ocr_pipeline/run_ocr_openrouter.py`) with the prompt in
-[qa_config.QA_GENERATION_PROMPT_TEMPLATE](qa_config.py#L99-L141) (prompt
+[qa_config.QA_GENERATION_PROMPT_TEMPLATE](qa_config.py#L117-L161) (prompt
 version `v2`), requesting `--pairs-per-chunk` (default 3) QA pairs as a
 strict JSON list per chunk: `question`, `answer`, `question_type`, and an
 optional `reasoning` (null unless the question genuinely needs it).
 [parse_qa_response](generate_qa_openrouter.py#L68-L99) validates the result,
 including that optional field. Resumable via
 [process_chunk](generate_qa_openrouter.py#L149-L190): each attempted chunk
-is appended to `output/generations/<source>/<document_id>.jsonl`, and a
+is appended to `output/generations/<source>/<origin>-<document_id>.jsonl`, and a
 re-run skips `chunk_id`s already recorded there. `--source`, `--origin`,
 `--max-chunks`, and `--budget-usd` all narrow scope, so a small
 representative sample can be produced (and sent to the partner) well before
 the full run.
 
-[qa_config.OPENROUTER_MODEL](qa_config.py#L150-L164) currently points at
+[qa_config.OPENROUTER_MODEL](qa_config.py#L168-L184) currently points at
 `google/gemini-3.1-pro-preview`, a stronger tier than the OCR pipeline's
 `flash-lite`, since QA generation leans more on instruction-following and
 reasoning than transcription. Verify that model slug and the placeholder
@@ -140,7 +194,7 @@ question, per the partner's two serving modes (retrieval vs. not):
 
 For a `no_context` record, the user message is just `"Question: <question>"`
 and the system prompt switches to
-[QA_SYSTEM_PROMPT_NO_CONTEXT](qa_config.py#L90-L95) (dropping "using the
+[QA_SYSTEM_PROMPT_NO_CONTEXT](qa_config.py#L108-L113) (dropping "using the
 supplied context", which would be wrong when there isn't one). The
 `with_context`/`no_context` split is assigned per QA pair with a seeded RNG
 (`CONTEXT_MODE_SEED = 42`), so it's reproducible across re-runs of the same
@@ -194,15 +248,15 @@ changed in [qa_config.py](qa_config.py) as a result:
    [TARGET_CHUNK_TOKENS = 900](qa_config.py#L50-L63) (cap 1050) and moved
    the QC check in `compile_qa_dataset.py` from full-record tokens to
    prompt-only tokens (see above).
-3. **Not every pair needs context.** [CONTEXT_RATIO = 0.7](qa_config.py#L65-L70)
+3. **Not every pair needs context.** [CONTEXT_RATIO = 0.7](qa_config.py#L83-L88)
    controls the with/without split, surfaced in `metadata.context_mode`.
 4. **Answers don't have to be strictly extractive** -- reasonable inference
    is fine as long as it stays supported by the context and introduces no
    outside facts. This was already the instruction in
-   [QA_GENERATION_PROMPT_TEMPLATE](qa_config.py#L99-L141); confirmed
+   [QA_GENERATION_PROMPT_TEMPLATE](qa_config.py#L117-L161); confirmed
    unchanged.
 5. **Question types**: `factual, explanatory, summarization, definitional,
-   inferential` ([qa_config.QUESTION_TYPES](qa_config.py#L86)). The
+   inferential` ([qa_config.QUESTION_TYPES](qa_config.py#L104)). The
    partner asked to see all of them in the sample, which is what
    `build_sample`'s round-robin guarantees.
 6. **Reasoning goes in a separate field**, not inline in the content --

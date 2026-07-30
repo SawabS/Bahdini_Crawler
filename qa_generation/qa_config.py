@@ -62,6 +62,24 @@ TARGET_CHUNK_TOKENS = 900
 MAX_CHUNK_TOKENS = 1050
 MIN_CHUNK_TOKENS = 120  # below this a chunk is too thin to ground a QA pair
 
+# Document-level text-quality gate. A meaningful slice of extractions/*/safe/
+# documents turned out to be legacy-font-encoding corruption (a wrong Kurdish
+# font codepage substituting characters, not caught by extract_pipeline.py's
+# presentation_form_ratio check since it produces plausible-looking Arabic-
+# script letter frequencies without spelling real words -- e.g. "ل ل ل ل" /
+# "S* S* S* S*"). Measured directly: the real Gemma tokenizer's chars/token
+# on a document's own chunks cleanly separates this -- the reviewed OCR
+# corpus (verified clean by inspection) sits overwhelmingly at 1.9-2.2
+# chars/token, while the corrupted safe-extraction documents sit at 1.0-1.5,
+# matching known garbled examples measured directly (1.18, 1.46) against
+# known clean ones (1.94). A per-chunk check is noisy (a single garbled
+# document can have individual chunks that dip as low as 0.12 on other
+# heuristics purely by chance line-wrapping); the per-document median across
+# its own chunks is what actually separates cleanly, so the gate is applied
+# per document, not per chunk -- one corrupted document is discarded whole
+# rather than partially.
+MIN_DOC_CHARS_PER_TOKEN = 1.5
+
 # Fraction of finished QA pairs delivered WITH context in the user message;
 # the rest are delivered as a bare question (no "Context: ..." block), per
 # the partner's two serving modes (retrieval-augmented vs. not). Applied at

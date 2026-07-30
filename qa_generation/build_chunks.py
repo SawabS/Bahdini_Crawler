@@ -10,10 +10,12 @@ Reads two source pools, both trusted and included unconditionally:
                                           accepted; rows with
                                           classification=="kurdish"
 
-Each document is split into paragraph-aware chunks sized for the ~1,000
-token/QA-record budget the partner side estimated (see qa_config.py), and
-every chunk is written as one row to qa_generation/output/chunks.jsonl -- the
-work queue generate_qa_openrouter.py consumes.
+Each document is first checked for legacy-font-encoding corruption (see
+qa_config.MIN_DOC_CHARS_PER_TOKEN) and skipped whole if it fails; survivors
+are split into paragraph-aware chunks sized for the ~1,000 token/QA-record
+budget the partner side estimated (see qa_config.py), and every chunk is
+written as one row to qa_generation/output/chunks.jsonl -- the work queue
+generate_qa_openrouter.py consumes.
 
 Run inside the conda "ai" env (no extra deps beyond stdlib are required):
     python3 qa_generation/build_chunks.py
@@ -22,6 +24,7 @@ Run inside the conda "ai" env (no extra deps beyond stdlib are required):
 import argparse
 import json
 import re
+import statistics
 import sys
 from collections import Counter
 
@@ -192,6 +195,8 @@ def main() -> int:
     total_chunks = 0
     total_tokens = 0
     skipped_empty = 0
+    skipped_garbled = 0
+    by_source_garbled = Counter()
 
     with open(cfg.CHUNKS_PATH, "w", encoding="utf-8") as out_handle:
         for doc in docs:
@@ -200,10 +205,25 @@ def main() -> int:
             if not chunks:
                 skipped_empty += 1
                 continue
-            for i, (chunk, token_estimate) in enumerate(
-                    zip(chunks, gtok.count_tokens_batch(chunks))):
+
+            token_estimates = gtok.count_tokens_batch(chunks)
+            chars_per_token = statistics.median(
+                len(chunk) / max(tokens, 1) for chunk, tokens in zip(chunks, token_estimates))
+            if chars_per_token < cfg.MIN_DOC_CHARS_PER_TOKEN:
+                skipped_garbled += 1
+                by_source_garbled[doc["source"]] += 1
+                continue
+
+            for i, (chunk, token_estimate) in enumerate(zip(chunks, token_estimates)):
+                # document_id is intentionally the same across origins for the
+                # same underlying file (qa_config.doc_id / gemini_ocr_pipeline's
+                # ocr_config.doc_id use the same scheme, on purpose, so ids
+                # line up). Several hundred documents genuinely exist in both
+                # pools (the OCR pipeline re-transcribes some "safe" sources
+                # for consistency), so chunk_id must include origin too or
+                # chunks from both would collide under the same id.
                 record = {
-                    "chunk_id": f"{doc['document_id']}-{i:03d}",
+                    "chunk_id": f"{doc['origin']}-{doc['document_id']}-{i:03d}",
                     "document_id": doc["document_id"],
                     "source": doc["source"],
                     "origin": doc["origin"],
@@ -222,17 +242,19 @@ def main() -> int:
 
     lines = ["# QA chunk queue", ""]
     lines.append(f"Documents seen: {len(docs)}  |  documents skipped (no usable chunks): "
-                 f"{skipped_empty}  |  chunks written: {total_chunks}  |  "
-                 f"est. total context tokens: {total_tokens:,}")
-    lines += ["", "| source | chunks |", "|---|---|"]
-    for source in sorted(by_source):
-        lines.append(f"| {source} | {by_source[source]} |")
+                 f"{skipped_empty}  |  documents skipped (likely corrupted/garbled text, "
+                 f"median chars/token < {cfg.MIN_DOC_CHARS_PER_TOKEN}): {skipped_garbled}  |  "
+                 f"chunks written: {total_chunks}  |  est. total context tokens: {total_tokens:,}")
+    lines += ["", "| source | chunks | docs skipped as garbled |", "|---|---|---|"]
+    for source in sorted(set(by_source) | set(by_source_garbled)):
+        lines.append(f"| {source} | {by_source[source]} | {by_source_garbled[source]} |")
     lines += ["", "| origin | chunks |", "|---|---|"]
     for origin in sorted(by_origin):
         lines.append(f"| {origin} | {by_origin[origin]} |")
     cfg.CHUNKS_REPORT_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     print(f"Wrote {total_chunks} chunks from {len(docs)} documents to {cfg.CHUNKS_PATH}")
+    print(f"Skipped {skipped_garbled} documents as likely corrupted/garbled text")
     print(f"Estimated total context tokens: {total_tokens:,}")
     print(f"Report: {cfg.CHUNKS_REPORT_PATH}")
     return 0

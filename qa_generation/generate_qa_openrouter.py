@@ -49,8 +49,8 @@ def load_chunks(sources=None, origins=None):
     return chunks
 
 
-def done_chunk_ids(source: str, document_id: str) -> set:
-    path = cfg.GENERATIONS_DIR / source / f"{document_id}.jsonl"
+def done_chunk_ids(source: str, origin: str, document_id: str) -> set:
+    path = cfg.GENERATIONS_DIR / source / f"{origin}-{document_id}.jsonl"
     if not path.is_file():
         return set()
     done = set()
@@ -180,7 +180,7 @@ async def process_chunk(chunk, sem, session, api_key, write_lock, state, args):
                   f"stopping.\n")
 
     state["totals"][record["status"]] = state["totals"].get(record["status"], 0) + 1
-    out_path = cfg.GENERATIONS_DIR / chunk["source"] / f"{chunk['document_id']}.jsonl"
+    out_path = cfg.GENERATIONS_DIR / chunk["source"] / f"{chunk['origin']}-{chunk['document_id']}.jsonl"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     line = json.dumps(record, ensure_ascii=False) + "\n"
     async with write_lock:
@@ -198,7 +198,7 @@ async def run(args) -> int:
 
     pending = []
     for chunk in chunks:
-        if chunk["chunk_id"] in done_chunk_ids(chunk["source"], chunk["document_id"]):
+        if chunk["chunk_id"] in done_chunk_ids(chunk["source"], chunk["origin"], chunk["document_id"]):
             continue
         pending.append(chunk)
     if args.max_chunks:
