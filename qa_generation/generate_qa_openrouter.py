@@ -8,9 +8,9 @@ processed chunk is appended to
 and a re-run skips chunk_ids already recorded there, so it is safe to
 interrupt (Ctrl-C) or cap with --budget-usd and continue later.
 
-This script only produces the raw {question, answer, question_type} pairs
-per chunk; run compile_qa_dataset.py afterwards to assemble the final
-messages+metadata JSONL agreed with the partner.
+This script only produces the raw {question, answer, question_type,
+reasoning} pairs per chunk; run compile_qa_dataset.py afterwards to
+assemble the final messages+metadata JSONL agreed with the partner.
 
 Run inside the conda "ai" env, from the repo root:
     python3 qa_generation/generate_qa_openrouter.py --max-chunks 20   # a quick sample
@@ -87,7 +87,12 @@ def parse_qa_response(text: str):
         qtype = item.get("question_type")
         if not question or not answer or qtype not in cfg.QUESTION_TYPES:
             continue
-        pairs.append({"question": question, "answer": answer, "question_type": qtype})
+        reasoning = item.get("reasoning")
+        reasoning = reasoning.strip() if isinstance(reasoning, str) and reasoning.strip() else None
+        pairs.append({
+            "question": question, "answer": answer, "question_type": qtype,
+            "reasoning": reasoning,
+        })
 
     if not pairs:
         return [], ("empty" if data == [] else "parse_error"), None

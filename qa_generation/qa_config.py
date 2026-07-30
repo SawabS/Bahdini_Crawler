@@ -49,16 +49,25 @@ def estimate_tokens(text: str) -> int:
 
 # --- chunking -----------------------------------------------------------
 #
-# The partner side estimated ~1,000 tokens per finished QA record
-# (system + context + question + answer combined -- see the email thread).
-# Measured with the real Gemma 4 chat template: the system prompt is 13
-# tokens and BOS+turn-marker overhead is ~16 tokens for a 3-message record,
-# so ~30 tokens of fixed overhead plus however long the question and answer
-# come out. That leaves the context chunk itself a target of ~700 tokens
-# (with headroom up to 850) comfortably inside the 1,000-token budget.
-TARGET_CHUNK_TOKENS = 700
-MAX_CHUNK_TOKENS = 850
+# Confirmed with the partner: the ~1,000-token budget covers the prompt side
+# only (system + question + context), not the answer, and it's a mean, not
+# a hard cap, so going over it in some cases is fine. Measured with the real
+# Gemma 4 chat template (system prompt 13 tokens; a representative ~40-token
+# Bahdini question; rendered with add_generation_prompt=True to match the
+# actual inference-time prompt) came to 77 fixed tokens for that example, so
+# ~900 tokens of context leaves comfortable room under the 1,000-token mean
+# for typical questions, with MAX_CHUNK_TOKENS as headroom for when a
+# question runs long.
+TARGET_CHUNK_TOKENS = 900
+MAX_CHUNK_TOKENS = 1050
 MIN_CHUNK_TOKENS = 120  # below this a chunk is too thin to ground a QA pair
+
+# Fraction of finished QA pairs delivered WITH context in the user message;
+# the rest are delivered as a bare question (no "Context: ..." block), per
+# the partner's two serving modes (retrieval-augmented vs. not). Applied at
+# compile time in compile_qa_dataset.py, not during generation -- Gemini
+# always sees the full context so every pair stays grounded either way.
+CONTEXT_RATIO = 0.7
 
 # --- source selection -----------------------------------------------------
 #
@@ -76,8 +85,14 @@ MIN_CHUNK_TOKENS = 120  # below this a chunk is too thin to ground a QA pair
 # about that envelope.
 QUESTION_TYPES = ["factual", "explanatory", "summarization", "definitional", "inferential"]
 
-QA_PROMPT_VERSION = "v1"
+QA_PROMPT_VERSION = "v2"
 QA_SYSTEM_PROMPT = "Answer the question in Bahdini Kurdish using the supplied context."
+# Used instead of QA_SYSTEM_PROMPT for the CONTEXT_RATIO-share of records
+# delivered without a context block, since "using the supplied context"
+# would be wrong when there isn't one. Not something the partner specified
+# in words; a direct consequence of the with/without-context split they did
+# ask for. Adjust the wording here if they want something different.
+QA_SYSTEM_PROMPT_NO_CONTEXT = "Answer the question in Bahdini Kurdish."
 
 PAIRS_PER_CHUNK = 3
 
@@ -105,12 +120,19 @@ QA_GENERATION_PROMPT_TEMPLATE = (
     "- If the context is too short, garbled, or content-free to support "
     "{n_pairs} distinct, well-grounded questions, return fewer pairs (an "
     "empty list is fine) rather than inventing filler.\n"
+    "- If answering the question genuinely requires connecting multiple "
+    "details in the context or drawing a conclusion beyond a single stated "
+    "fact, also fill in \"reasoning\": a brief step-by-step justification, "
+    "in Bahdini Kurdish, for how the answer follows from the context. If "
+    "the question is directly answerable by quoting or restating one "
+    "explicit fact, set \"reasoning\" to null; do not pad it with filler.\n"
     "\n"
     "Output strict JSON only: a list of objects, no markdown fences, no "
     "commentary before or after. Each object must have exactly these keys:\n"
     "  \"question\": string\n"
     "  \"answer\": string\n"
     "  \"question_type\": one of {question_types}\n"
+    "  \"reasoning\": string or null (see rule above)\n"
     "\n"
     "Context:\n"
     "\"\"\"\n"

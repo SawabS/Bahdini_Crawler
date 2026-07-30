@@ -85,6 +85,20 @@ def count_chat_tokens(messages: list) -> int:
     return len(tok(rendered, add_special_tokens=False)["input_ids"])
 
 
+def count_prompt_tokens(messages: list) -> int:
+    """Token count of the prompt Gemma actually sees before generating the
+    answer: every message up to (not including) the assistant turn,
+    rendered with add_generation_prompt=True. This is what the partner's
+    ~1,000-token budget is measured against -- the answer is not counted."""
+    tok = _load()
+    prompt_messages = [m for m in messages if m["role"] != "assistant"]
+    if tok is None:
+        return sum(cfg.estimate_tokens(m["content"]) for m in prompt_messages)
+    rendered = tok.apply_chat_template(
+        prompt_messages, tokenize=False, add_generation_prompt=True)
+    return len(tok(rendered, add_special_tokens=False)["input_ids"])
+
+
 def encode(text: str) -> list:
     tok = _load()
     if tok is None:
