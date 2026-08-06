@@ -99,9 +99,9 @@ def parse_qa_response(text: str):
     return pairs, "ok", None
 
 
-async def call_openrouter(session, sem, api_key, prompt, state):
+async def call_openrouter(session, sem, api_key, prompt, state, model):
     payload = {
-        "model": cfg.OPENROUTER_MODEL,
+        "model": model,
         "temperature": 0.7,
         "max_tokens": cfg.MAX_OUTPUT_TOKENS,
         "messages": [{"role": "user", "content": prompt}],
@@ -150,13 +150,13 @@ async def process_chunk(chunk, sem, session, api_key, write_lock, state, args):
     if state["stop"]:
         return
     prompt = cfg.build_qa_prompt(chunk["text"], args.pairs_per_chunk)
-    result = await call_openrouter(session, sem, api_key, prompt, state)
+    result = await call_openrouter(session, sem, api_key, prompt, state, args.model)
 
     record = {
         "chunk_id": chunk["chunk_id"],
         "document_id": chunk["document_id"],
         "source": chunk["source"],
-        "model": cfg.OPENROUTER_MODEL,
+        "model": args.model,
         "prompt_version": cfg.QA_PROMPT_VERSION,
         "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
@@ -263,6 +263,9 @@ def main() -> int:
                         help="chunks dispatched per gather() batch (default: 16)")
     parser.add_argument("--pairs-per-chunk", type=int, default=cfg.PAIRS_PER_CHUNK,
                         help=f"QA pairs requested per chunk (default: {cfg.PAIRS_PER_CHUNK})")
+    parser.add_argument("--model", default=cfg.OPENROUTER_MODEL,
+                        help=f"OpenRouter model slug, for A/B piloting a different tier "
+                             f"without changing the pipeline default (default: {cfg.OPENROUTER_MODEL})")
     parser.add_argument("--no-shuffle", action="store_true",
                         help="process chunks in file order instead of a fixed shuffle "
                              "(shuffling spreads a --budget-usd or --max-chunks cap "
