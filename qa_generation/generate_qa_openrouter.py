@@ -34,19 +34,44 @@ FENCE_RE = re.compile(r"^```[a-zA-Z]*\n|\n?```$")
 RETRY_ATTEMPTS = 5
 
 
-def load_chunks(sources=None, origins=None):
+def index_chunks(sources=None, origins=None):
+    """Single streaming pass over chunks.jsonl (~700MB, 246k rows) that
+    keeps only lightweight per-chunk metadata plus a byte offset, not the
+    chunk text -- materializing every row's full text at once (measured:
+    ~1.1GB RSS for the whole file) is unnecessary and, on a machine already
+    under memory pressure, a real OOM risk for a run meant to stay alive for
+    hours. Full records (with text) are re-read on demand, one batch at a
+    time, in fetch_batch() below."""
     if not cfg.CHUNKS_PATH.is_file():
         sys.exit(f"{cfg.CHUNKS_PATH} does not exist; run build_chunks.py first.")
-    chunks = []
+    index = []
     with open(cfg.CHUNKS_PATH, encoding="utf-8") as handle:
-        for line in handle:
+        offset = handle.tell()
+        line = handle.readline()
+        while line:
+            next_offset = handle.tell()
             row = json.loads(line)
-            if sources and row["source"] not in sources:
-                continue
-            if origins and row["origin"] not in origins:
-                continue
-            chunks.append(row)
-    return chunks
+            if not (sources and row["source"] not in sources) and \
+                    not (origins and row["origin"] not in origins):
+                index.append({
+                    "chunk_id": row["chunk_id"], "document_id": row["document_id"],
+                    "source": row["source"], "origin": row["origin"], "offset": offset,
+                })
+            offset = next_offset
+            line = handle.readline()
+    return index
+
+
+def fetch_batch(entries):
+    """Re-read full records (including text) for a batch of index entries,
+    via seek(), so at most `batch_size` chunks' worth of text is ever in
+    memory at once instead of the whole corpus."""
+    with open(cfg.CHUNKS_PATH, encoding="utf-8") as handle:
+        out = []
+        for entry in entries:
+            handle.seek(entry["offset"])
+            out.append(json.loads(handle.readline()))
+        return out
 
 
 def done_chunk_ids(source: str, origin: str, document_id: str) -> set:
@@ -140,7 +165,8 @@ async def call_openrouter(session, sem, api_key, prompt, state, model):
             "text": text,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
-            "est_cost_usd": round(cfg.estimate_cost_usd(input_tokens, output_tokens), 6),
+            "est_cost_usd": round(
+                cfg.estimate_cost_usd(input_tokens, output_tokens, model), 6),
         }
     return {"status": "error", "text": "",
             "error": f"{type(last_error).__name__}: {last_error}"}
@@ -192,19 +218,23 @@ async def process_chunk(chunk, sem, session, api_key, write_lock, state, args):
 
 async def run(args) -> int:
     api_key = cfg.load_dotenv_key("OPENROUTER_API_KEY")
-    chunks = load_chunks(sources=args.source, origins=args.origin)
+    index = index_chunks(sources=args.source, origins=args.origin)
     if not args.no_shuffle:
-        random.Random(0).shuffle(chunks)
+        random.Random(0).shuffle(index)
 
+    done_cache = {}
     pending = []
-    for chunk in chunks:
-        if chunk["chunk_id"] in done_chunk_ids(chunk["source"], chunk["origin"], chunk["document_id"]):
+    for entry in index:
+        key = (entry["source"], entry["origin"], entry["document_id"])
+        if key not in done_cache:
+            done_cache[key] = done_chunk_ids(entry["source"], entry["origin"], entry["document_id"])
+        if entry["chunk_id"] in done_cache[key]:
             continue
-        pending.append(chunk)
+        pending.append(entry)
     if args.max_chunks:
         pending = pending[: args.max_chunks]
 
-    print(f"{len(chunks)} chunks total, {len(pending)} pending after resuming from "
+    print(f"{len(index)} chunks total, {len(pending)} pending after resuming from "
           f"{cfg.GENERATIONS_DIR}")
     if args.dry_run:
         print("--dry-run: not calling OpenRouter.")
@@ -226,7 +256,7 @@ async def run(args) -> int:
             for start in range(0, len(pending), args.batch_size):
                 if state["stop"]:
                     break
-                batch = pending[start:start + args.batch_size]
+                batch = fetch_batch(pending[start:start + args.batch_size])
                 await asyncio.gather(*[
                     process_chunk(chunk, sem, session, api_key, write_lock, state, args)
                     for chunk in batch

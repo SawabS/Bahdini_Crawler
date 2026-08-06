@@ -77,8 +77,83 @@ def get_preprocessor():
     return _preprocessor
 
 
+# Two distinct font-encoding failure modes found by direct inspection of
+# extracted text (see qa_generation/README.md, "A third corruption class"):
+# PDFs whose fonts have no/broken ToUnicode mapping leak raw font-internal
+# character codes through PyMuPDF. Fonts built on WinAnsiEncoding (cp1252)
+# leak into the Unicode C1 control range (0x80-0x9F) -- almost always a
+# smart quote/dash that decoded without translation; recoverable
+# deterministically. Custom/symbol/legacy-Kurdish fonts leak into the
+# Private Use Area (U+E000-U+F8FF) -- most are decorative (bullets), but a
+# PUA glyph sitting *between two Arabic-script letters* is very likely a
+# silently substituted real letter, not decoration, and must not be
+# stripped -- see handle_pua_chars below.
+_ARABIC_LETTER_RE = re.compile(r"[؀-ۿ]")
+
+
+def recover_cp1252_controls(text: str) -> str:
+    """Undo WinAnsiEncoding-as-raw-bytes mojibake: C1 control codes
+    (0x80-0x9F, excluding real control chars \\n/\\t) that are actually a
+    cp1252 printable character (curly quotes, em-dash, ...) surviving
+    un-translated. Drops the character if cp1252 leaves that byte undefined
+    -- better than keeping an uninterpretable control code."""
+    out = []
+    for ch in text:
+        code = ord(ch)
+        if 0x80 <= code <= 0x9F and ch not in ("\n", "\t"):
+            try:
+                out.append(bytes([code]).decode("cp1252"))
+            except UnicodeDecodeError:
+                pass  # undefined in cp1252 -- drop rather than keep a raw control code
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def handle_pua_chars(text: str) -> tuple[str, int]:
+    """Strip Private Use Area characters that are standalone decoration
+    (the common case: bullet-list glyphs from a symbol font), but leave any
+    PUA character sitting between two Arabic-script letters untouched --
+    that pattern means a real letter was likely substituted, and silently
+    deleting it would corrupt the word rather than clean it. Returns
+    (text_with_decorative_PUA_removed, count_of_midword_PUA_left_in_place)
+    so the caller can route the document to needs_ocr instead of "safe"."""
+    chars = list(text)
+    midword_count = 0
+    out = []
+    for i, ch in enumerate(chars):
+        if unicodedata.category(ch) != "Co":
+            out.append(ch)
+            continue
+        before = chars[i - 1] if i > 0 else ""
+        after = chars[i + 1] if i + 1 < len(chars) else ""
+        if _ARABIC_LETTER_RE.match(before) and _ARABIC_LETTER_RE.match(after):
+            midword_count += 1
+            out.append(ch)  # leave in place -- don't guess, don't delete
+        # else: standalone/decorative PUA (e.g. a bullet) -- drop it
+    return "".join(out), midword_count
+
+
+def count_stray_c0_controls(text: str) -> int:
+    """Count raw C0 control codes (0x00-0x1F, excluding real \\n/\\t) still
+    in the text. Found by the same mechanism as the PUA case (a font byte
+    with no ToUnicode mapping leaking through raw) but landing in the C0
+    range instead -- e.g. 'رئی\\x19\\x19\\x19\\x19س' (repeated 0x19 clusters
+    sitting mid-word). Unlike the C1 range (0x80-0x9F), there is no cp1252
+    (or any other) table to recover an intended character from a C0 code --
+    it has no legitimate use in body text at all, so this is pure
+    detection, not recovery. Never strip these blind: a control code sitting
+    inside a word is exactly the same "font glyph substituted for a real
+    letter" failure as mid-word PUA, and deleting it would corrupt the word
+    rather than clean it -- route the whole document to needs_ocr instead
+    (see classification())."""
+    return sum(1 for ch in text if ch not in ("\n", "\t") and unicodedata.category(ch) == "Cc")
+
+
 def clean_text(raw: str) -> str:
     text = unicodedata.normalize("NFKC", raw)
+    text = recover_cp1252_controls(text)
+    text, _ = handle_pua_chars(text)
     prep = get_preprocessor()
     # normalize() line by line: KLPT strips newlines when fed whole documents
     lines = [prep.normalize(line) if line.strip() else "" for line in text.split("\n")]
@@ -90,10 +165,13 @@ def clean_text(raw: str) -> str:
 def text_stats(text: str) -> dict:
     arabic = len(ARABIC_RE.findall(text))
     total_alpha = sum(ch.isalpha() for ch in text)
+    _, midword_pua = handle_pua_chars(text)
     return {
         "chars": len(text),
         "arabic_script_ratio": round(arabic / total_alpha, 3) if total_alpha else 0.0,
         "kurdish_chars": len(KURDISH_RE.findall(text)),
+        "midword_pua_count": midword_pua,
+        "stray_control_count": count_stray_c0_controls(text),
     }
 
 
@@ -232,6 +310,17 @@ def classification(rec: dict) -> tuple[str, str]:
     if (rec.get("chars", 0) >= 1000 and
             rec.get("kurdish_chars", 0) / rec["chars"] < MIN_KURDISH_RATIO):
         return "ocr_needed", "text is unlikely to be Kurdish Bahdini"
+    if rec.get("midword_pua_count", 0) > 0:
+        return ("ocr_needed",
+                "legacy-font Private Use Area glyph found mid-word -- likely a "
+                "silently substituted real letter (see qa_generation/README.md, "
+                "'A third corruption class')")
+    if rec.get("stray_control_count", 0) > 0:
+        return ("ocr_needed",
+                "raw control character(s) left in text after cp1252 recovery -- "
+                "no safe way to recover the intended character, same "
+                "font-substitution failure as the mid-word PUA case (see "
+                "qa_generation/README.md, 'A third corruption class')")
     return "safe", "clean text layer and plausible Kurdish Bahdini"
 
 

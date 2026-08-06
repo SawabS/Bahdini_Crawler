@@ -8,10 +8,10 @@
       "extracted_partial": 1
     },
     "by_classification": {
-      "ocr_needed": 427,
-      "safe": 458
+      "ocr_needed": 465,
+      "safe": 420
     },
-    "extracted_chars": 128322312
+    "extracted_chars": 126280190
   },
   "telegram_jihana_pertuken_pdf": {
     "documents": 702,
@@ -23,10 +23,10 @@
       "error": 1
     },
     "by_classification": {
-      "ocr_needed": 349,
-      "safe": 353
+      "ocr_needed": 397,
+      "safe": 305
     },
-    "extracted_chars": 100384646
+    "extracted_chars": 99153250
   },
   "telegram_pertok_badini": {
     "documents": 156,
@@ -37,10 +37,10 @@
       "extracted_partial": 1
     },
     "by_classification": {
-      "safe": 78,
-      "ocr_needed": 78
+      "ocr_needed": 89,
+      "safe": 67
     },
-    "extracted_chars": 24849981
+    "extracted_chars": 24675298
   },
   "facebook": {
     "documents": 1318,
@@ -51,10 +51,10 @@
       "extracted_partial": 10
     },
     "by_classification": {
-      "ocr_needed": 1100,
-      "safe": 218
+      "ocr_needed": 1135,
+      "safe": 183
     },
-    "extracted_chars": 164822874
+    "extracted_chars": 163092955
   },
   "sh2_unicodefixed_bahdini": {
     "documents": 241,
@@ -62,10 +62,10 @@
       "extracted": 241
     },
     "by_classification": {
-      "safe": 237,
-      "ocr_needed": 4
+      "safe": 236,
+      "ocr_needed": 5
     },
-    "extracted_chars": 6266370
+    "extracted_chars": 6266326
   },
   "govarabadinan": {
     "documents": 0,
@@ -80,18 +80,18 @@
     "extracted_chars": 0
   },
   "pertokenbadini": {
-    "documents": 215,
+    "documents": 211,
     "by_status": {
-      "extracted": 175,
-      "extracted_suspect": 22,
+      "extracted": 172,
+      "extracted_suspect": 21,
       "needs_ocr": 17,
       "extracted_partial": 1
     },
     "by_classification": {
-      "safe": 75,
-      "ocr_needed": 140
+      "safe": 68,
+      "ocr_needed": 143
     },
-    "extracted_chars": 44356738
+    "extracted_chars": 41526152
   },
   "spirez": {
     "documents": 2291,
@@ -101,22 +101,10 @@
       "extracted_suspect": 9
     },
     "by_classification": {
-      "ocr_needed": 2072,
-      "safe": 219
+      "ocr_needed": 2074,
+      "safe": 217
     },
-    "extracted_chars": 5404413
-  },
-  "uod": {
-    "documents": 1481,
-    "by_status": {
-      "extracted": 1452,
-      "extracted_suspect": 29
-    },
-    "by_classification": {
-      "ocr_needed": 900,
-      "safe": 581
-    },
-    "extracted_chars": 61893728
+    "extracted_chars": 5404364
   },
   "xaniagency": {
     "documents": 0,
@@ -133,9 +121,9 @@
       "extracted_suspect": 72
     },
     "by_classification": {
-      "ocr_needed": 397,
-      "safe": 316
+      "ocr_needed": 406,
+      "safe": 307
     },
-    "extracted_chars": 40967676
+    "extracted_chars": 36086274
   }
 }

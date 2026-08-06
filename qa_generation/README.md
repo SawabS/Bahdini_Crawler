@@ -133,6 +133,111 @@ per-document generation file name (`output/generations/<source>/<origin>-<docume
 `generate_qa_openrouter.py`); verified zero collisions in the current
 254,872-chunk file.
 
+## A third corruption class: stray control/PUA characters (fixed)
+
+`MIN_DOC_CHARS_PER_TOKEN` (above) catches wholesale character-soup
+corruption, but there's a second, distinct failure mode from the same root
+cause that it does not catch: individual stray non-printable characters
+scattered inside otherwise-clean chunks. Found by opening
+`output/chunks.jsonl` in a pager and noticing a boxed control-character
+glyph mixed into real Bahdini text; investigated in
+[`investigate_chunk_control_chars.ipynb`](investigate_chunk_control_chars.ipynb)
+(run with the `ai` conda kernel — has pandas/matplotlib/jupyter; the base
+env doesn't).
+
+**Original scope** (measured against the pre-fix `output/chunks.jsonl`):
+374 of ~4,359 documents (3.93% of 254,872 chunks) carried at least one
+genuine non-printable character. Three different mechanisms turned up,
+across two rounds of investigation:
+
+- **`Cc` cp1252 mojibake** (39 documents): PDF fonts using Windows'
+  `WinAnsiEncoding` (cp1252) — curly quotes, em-dashes — decoded without
+  translation, so bytes `0x80`-`0x9F` survive as raw C1 control codes
+  instead of the character they were meant to be. Deterministically
+  recoverable via `bytes([n]).decode("cp1252")`.
+- **`Co` Private Use Area glyphs** (344 documents): custom/symbol/legacy
+  Kurdish fonts with no (or a broken) `ToUnicode` CMap in the PDF — the
+  same underlying "font glyph doesn't map to correct Unicode" problem
+  behind the character-soup case above, just a different symptom. Of these,
+  315 documents only showed PUA as standalone decoration (safe to strip);
+  29 showed it mid-word, between two Arabic-script letters — i.e. an
+  actual letter got silently replaced, the same class of bug
+  `MIN_DOC_CHARS_PER_TOKEN` was built to catch, just invisible to that
+  particular check.
+- **Raw C0 control codes** (found *after* the first fix pass, verifying the
+  rebuilt corpus turned up a residual 307 chunks / 27 documents the fix
+  above didn't touch): the same font-substitution failure landing in the
+  `0x00`-`0x1F` range instead — e.g. `رئی\x19\x19\x19\x19س` (repeated `0x19`
+  clusters sitting mid-word). No cp1252-style recovery table applies to this
+  range; unlike decorative PUA, a C0 control code has no legitimate
+  standalone use in body text at all, so any occurrence is treated as a
+  corruption signal, never silently stripped.
+
+**The through-line, and the one rule that matters for any future case like
+this**: never blanket-strip an unrecognized character class. `Co`/PUA had a
+genuine decorative-use majority (bullets) alongside real letter
+substitution — collapsing that distinction would have silently deleted real
+words in the 29 mid-word documents.
+
+**Why the existing gate misses this**: affected chunks' chars/token ratio
+(mean 1.84) sits only slightly below unaffected chunks (mean 2.02), nowhere
+near the 1.5 cutoff — a handful of stray characters gets averaged out by an
+otherwise-normal ~900-token chunk. `Cf`-category characters (`U+06DD`
+Arabic end-of-ayah, `U+200E`/`U+200F` bidi marks, `U+200D` ZWJ) look
+superficially similar under a naive "non-printable" scan but are legitimate
+Bahdini/Arabic-script content, not corruption — don't include `Cf` in any
+future corruption check built from this.
+
+**Root cause, confirmed**: predates this pipeline entirely. The corrupted
+bytes are already present in `extractions/facebook/safe/*.txt` (the output
+of `scripts/extract_pipeline.py`'s `extract_pdf()`, from an earlier
+extraction run) — `build_chunks.py` and `generate_qa_openrouter.py` never
+touch byte-level encoding, only text/whitespace. `extract_pipeline.py`'s
+`clean_text()` runs NFKC + KLPT Kurdish normalization and nothing else; it
+has no handling for either corruption mechanism above. Confirmed by origin:
+11.66% of `safe_extraction`-origin chunks affected vs. 0.36% of
+`ocr_corpus`-origin chunks — almost exclusive to the native PDF text layer,
+since Gemini OCR reads the rendered page image and never depends on the
+PDF's internal font encoding.
+
+**Status: fixed.** `clean_text()`, `text_stats()`, and `classification()` in
+`scripts/extract_pipeline.py` now handle all three mechanisms:
+`recover_cp1252_controls()` deterministically repairs `Cc` mojibake;
+`handle_pua_chars()` strips decorative `Co` but leaves mid-word `Co` in
+place and flags it; `count_stray_c0_controls()` flags any residual C0
+control code. Both flags route the whole document to `ocr_needed` via
+`classification()`, exactly like the existing `MIN_DOC_CHARS_PER_TOKEN`
+gate — this is now a permanent, first-class check, not a one-off patch, so
+any future extraction run (a new crawl, a re-run) gets it automatically.
+
+Applied to the already-extracted corpus with
+[`scripts/backfill_char_corruption_fix.py`](../scripts/backfill_char_corruption_fix.py)
+— rewrites `extractions/*/safe/*.txt` in place using the fixed
+`clean_text()`, refreshes each manifest record's stats, then calls
+`classify_source()` to physically move any newly-flagged document from
+`safe/` to `ocr_needed/`. Entirely local (re-processes already-extracted
+text, no PDF re-parsing, no network/API calls) — **$0**.
+
+**Before/after** (`output/chunks_report.md`, two backfill passes — cp1252 +
+PUA first, then the C0 extension after verification turned up the
+residual):
+
+| | before | after |
+|---|---|---|
+| documents seen | 5,370 | 5,219 (151 reclassified to `ocr_needed`) |
+| docs skipped as garbled (`MIN_DOC_CHARS_PER_TOKEN`) | 369 | 264 (105 *fewer* — stray characters were dragging otherwise-clean documents under the 1.5 cutoff; the fix rescued them) |
+| chunks written | 254,872 | 246,515 (-3.3%) |
+| context tokens | 189,053,622 | 183,119,057 (-3.1%) |
+| chunks with real corruption (`Cc`/`Co`/`Cs`, `safe_extraction` origin) | 10,026 (374 docs) | **0** |
+| chunks with real corruption (any origin) | 10,026 | 8, all in `ocr_corpus` — a separate, untouched pipeline (Gemini OCR doesn't depend on PDF font encoding, so this fix doesn't apply there; a different, much smaller, unrelated residual) |
+
+**Impact on the already-recorded pilot generation**: of 255 real chunk
+attempts recorded before the fix (`output/generations/`), 245 (96%) still
+match a `chunk_id` in the rebuilt `chunks.jsonl` and stay valid; 10 (4%)
+were orphaned by chunk-boundary shifts and will be silently regenerated as
+new pending chunks on the next `generate_qa_openrouter.py` run — a few
+cents of redundant spend, not data loss.
+
 ## Generation
 
 ```bash

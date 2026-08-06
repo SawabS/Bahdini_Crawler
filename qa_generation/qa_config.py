@@ -112,7 +112,7 @@ QA_SYSTEM_PROMPT = "Answer the question in Bahdini Kurdish using the supplied co
 # ask for. Adjust the wording here if they want something different.
 QA_SYSTEM_PROMPT_NO_CONTEXT = "Answer the question in Bahdini Kurdish."
 
-PAIRS_PER_CHUNK = 3
+PAIRS_PER_CHUNK = 4
 
 QA_GENERATION_PROMPT_TEMPLATE = (
     "You are building instruction-tuning data for a 100% pure Bahdini (Badini) Kurdish "
@@ -168,25 +168,45 @@ def build_qa_prompt(context: str, n_pairs: int = PAIRS_PER_CHUNK) -> str:
 # --- OpenRouter backend ---------------------------------------------------
 #
 # Reuses the OPENROUTER_API_KEY already configured for gemini_ocr_pipeline/.
-# Pick a stronger Gemini tier than the OCR pipeline's flash-lite (QA
-# generation needs better instruction-following / reasoning in Bahdini);
-# verify this slug against the current OpenRouter model catalog before
-# running at scale, and adjust pricing below to match.
-OPENROUTER_MODEL = "google/gemini-3.1-pro-preview"
+OPENROUTER_MODEL = "google/gemini-3.1-flash-lite"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-# PLACEHOLDER pricing -- verify against OpenRouter's model page before
-# trusting any cost total computed with these.
-OPENROUTER_INPUT_USD_PER_M = 1.25
-OPENROUTER_OUTPUT_USD_PER_M = 5.00
+
+# Per-model USD/million-token pricing, (input, output).
+#
+# This used to be a single pair of module-level constants holding
+# pro-preview's rate, applied to every run regardless of which model was
+# actually called. Once generate_qa_openrouter.py grew a --model flag that
+# became a silent 3.75x overstatement on flash-lite runs: a live run
+# reported $61.07 while OpenRouter's own dashboard showed $16 for the same
+# traffic. That is not just a cosmetic display bug -- --budget-usd is
+# evaluated against this number, so an inflated estimate makes a run
+# self-stop long before its real budget is spent (the $350 cap on the first
+# full-corpus attempt would have halted it at ~32% of the queue, having
+# actually spent ~$93).
+#
+# Keep this table keyed by the exact OpenRouter model slug, and verify a new
+# entry against that model's OpenRouter page before running at scale.
+# flash-lite's rate is cross-checked against gemini_ocr_pipeline/ocr_config.py,
+# which has been billing correctly against the same key for the OCR corpus,
+# and confirmed against real billed spend (predicted $16.26 vs $16 actual).
+OPENROUTER_PRICING = {
+    "google/gemini-3.1-flash-lite": (0.25, 1.50),
+    "google/gemini-3.1-pro-preview": (1.25, 5.00),  # unverified placeholder
+}
+# Used only when a slug is missing from the table above. Deliberately the
+# most expensive known rate, so an unknown model overestimates (a run stops
+# early) rather than underestimates (a run overspends).
+OPENROUTER_PRICING_FALLBACK = (1.25, 5.00)
 
 MAX_OUTPUT_TOKENS = 2048
 
 
-def estimate_cost_usd(input_tokens: int, output_tokens: int) -> float:
-    return (
-        input_tokens * OPENROUTER_INPUT_USD_PER_M
-        + output_tokens * OPENROUTER_OUTPUT_USD_PER_M
-    ) / 1_000_000
+def estimate_cost_usd(input_tokens: int, output_tokens: int, model: str = None) -> float:
+    """Cost for one call. `model` should be the slug actually sent to
+    OpenRouter; omitting it falls back to OPENROUTER_MODEL's rate."""
+    rate_in, rate_out = OPENROUTER_PRICING.get(
+        model or OPENROUTER_MODEL, OPENROUTER_PRICING_FALLBACK)
+    return (input_tokens * rate_in + output_tokens * rate_out) / 1_000_000
 
 
 def doc_id(source: str, input_path: str) -> str:
