@@ -261,12 +261,59 @@ re-run skips `chunk_id`s already recorded there. `--source`, `--origin`,
 representative sample can be produced (and sent to the partner) well before
 the full run.
 
-[qa_config.OPENROUTER_MODEL](qa_config.py#L168-L184) currently points at
-`google/gemini-3.1-pro-preview`, a stronger tier than the OCR pipeline's
-`flash-lite`, since QA generation leans more on instruction-following and
-reasoning than transcription. Verify that model slug and the placeholder
-per-token pricing against OpenRouter's current catalog before running at any
-real budget.
+[qa_config.OPENROUTER_MODEL](qa_config.py) defaults to
+`google/gemini-3.1-flash-lite`, overridable per run with `--model`. A pilot
+of 40 chunks each at 3 and 4 pairs found flash-lite returning the requested
+count on 39/40 chunks either way, with the fourth pair reading as a
+genuinely distinct question rather than filler, so
+[PAIRS_PER_CHUNK](qa_config.py) is 4.
+
+### Pricing is per model, and getting it wrong is not just cosmetic
+
+`estimate_cost_usd()` takes the model slug and looks the rate up in
+`OPENROUTER_PRICING`. It used to hold a single hardcoded pair of
+pro-preview constants applied to every run regardless of `--model`. On a
+flash-lite run that overstated cost by **3.75x**: a live run reported
+`$61.07` while OpenRouter's own dashboard showed `$16` for the same
+traffic.
+
+The reason this matters beyond the display: **`--budget-usd` is evaluated
+against this estimate**, so an inflated rate makes a run stop far short of
+its real budget. The first full-corpus attempt carried `--budget-usd 350`
+and would have self-halted at roughly 32% of the queue having actually
+spent about $93, looking for all the world like a completed run.
+
+When adding a model, add its row to `OPENROUTER_PRICING` and verify against
+that model's OpenRouter page. An unknown slug deliberately falls back to
+the most expensive known rate, so the failure mode is stopping early rather
+than overspending. Real measured rate for the current default is about
+**$296 for the full 246,515-chunk corpus**.
+
+Note that generation records written before this fix carry an inflated
+`est_cost_usd`. Both `input_tokens` and `output_tokens` are stored
+correctly, so the field is recomputable; `dashboard.py` recomputes rather
+than trusting it.
+
+## Live monitoring
+
+```bash
+python3 qa_generation/dashboard.py     # http://127.0.0.1:8765
+```
+
+An interactive local dashboard for watching a long run: streaming feed of
+the actual generated Bahdini QA pairs with each new arrival animated in,
+throughput chart, per-source and per-question-type distributions, corrected
+running cost, and a projected full-run total. Filter by source or question
+type, search question and answer text, pause the feed without pausing the
+counters, toggle a table view, toggle light and dark.
+
+Two things keep it cheap enough to leave open for a whole multi-hour run:
+the server tails `generations/*.jsonl` by byte offset so it only reads
+newly-appended bytes, and the browser polls `/api/delta?since=<seq>` which
+returns only records newer than the client's last sequence number. Measured
+on a live run that is 931 KB for a cold load versus about 2 KB per delta,
+which is what makes a 350 ms refresh interval reasonable. Stdlib only,
+binds `127.0.0.1`, about 26 MB resident.
 
 ## Compiling the dataset
 
