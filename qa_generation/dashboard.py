@@ -440,8 +440,10 @@ PAGE = r"""<!doctype html>
     </div>
   </div>
 
-  <div class="feed" id="feed"><div class="muted">Waiting for the next batch to land</div></div>
-
+  <!-- Cards and table are two views of the same filtered list, so exactly
+       one is ever visible and the table sits here rather than after the
+       feed: appended below, it opened several screens down past 80 cards of
+       Bahdini and read as a dead button. -->
   <div class="panel hidden" id="table-panel">
     <h2>Recent generations, table view</h2>
     <div style="overflow-x:auto">
@@ -450,6 +452,8 @@ PAGE = r"""<!doctype html>
       </tr></thead><tbody></tbody></table>
     </div>
   </div>
+
+  <div class="feed" id="feed"><div class="muted">Waiting for the next batch to land</div></div>
 
 </div>
 <div class="tip" id="tip"></div>
@@ -463,6 +467,7 @@ const CLIENT_FEED_MAX = 250;
 let seq = 0;
 let items = [];               // newest first
 let streaming = true;
+let tableView = false;        // cards and table are mutually exclusive views
 let pendingWhilePaused = 0;
 let totals = null, bySource = {}, byQtype = {}, throughput = [];
 let firstPaint = true;
@@ -693,6 +698,21 @@ function renderFeed() {
     return;
   }
 
+  // Only the visible view is built. At a 350ms poll over a multi-hour run,
+  // rendering 80 hidden cards every tick is the most expensive thing this
+  // page would otherwise do.
+  if (tableView) {
+    $("table").querySelector("tbody").innerHTML = vis.slice(0, 60).flatMap((it) =>
+      (it._visiblePairs || it.pairs).map((p) =>
+        "<tr><td>" + esc(it.source) + "</td><td>" + esc(p.question_type || "") +
+        '</td><td class="rtl">' + esc(p.question) + '</td><td class="rtl">' + esc(p.answer) + "</td></tr>")
+    ).join("");
+    // Still consume the one-shot flag: arrivals that landed while the table
+    // was up have had their turn, and should not animate on the way back.
+    for (const it of items) it._fresh = false;
+    return;
+  }
+
   $("feed").innerHTML = vis.slice(0, 80).map((it) => {
     const pairs = it._visiblePairs || it.pairs;
     return '<div class="card' + (it._fresh ? " fresh" : "") + '">' +
@@ -715,12 +735,6 @@ function renderFeed() {
 
   // one-shot: the arrival animation should not replay on later repaints
   for (const it of items) it._fresh = false;
-
-  $("table").querySelector("tbody").innerHTML = vis.slice(0, 60).flatMap((it) =>
-    (it._visiblePairs || it.pairs).map((p) =>
-      "<tr><td>" + esc(it.source) + "</td><td>" + esc(p.question_type || "") +
-      '</td><td class="rtl">' + esc(p.question) + '</td><td class="rtl">' + esc(p.answer) + "</td></tr>")
-  ).join("");
 }
 
 function syncFilterOptions() {
@@ -758,9 +772,13 @@ $("btn-theme").addEventListener("click", () => {
 });
 
 $("btn-table").addEventListener("click", () => {
-  const p = $("table-panel");
-  p.classList.toggle("hidden");
-  $("btn-table").classList.toggle("active", !p.classList.contains("hidden"));
+  tableView = !tableView;
+  $("table-panel").classList.toggle("hidden", !tableView);
+  $("feed").classList.toggle("hidden", tableView);
+  const b = $("btn-table");
+  b.textContent = tableView ? "Card view" : "Table view";
+  b.classList.toggle("active", tableView);
+  renderFeed();                 // the view being switched to is empty until built
 });
 
 for (const id of ["f-source", "f-qtype", "f-text"]) {
