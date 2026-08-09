@@ -24,7 +24,13 @@ flowchart TD
     F --> G["compile_qa_dataset.py"]
     G --> H[("output/dataset/qa_pairs.jsonl<br/>final messages+metadata JSONL")]
     G --> I[("output/dataset/sample.jsonl<br/>first N records, for partner review")]
+    F -.-> J["dashboard.py<br/>live monitoring, tails F"]
+    F -.-> K["export_qa_csv.py"]
+    K -.-> L[("output/dataset/qa_review_*.csv<br/>flat pair+context CSV, human review")]
 ```
+
+`dashboard.py` and `export_qa_csv.py` (dashed) are read-only observers of
+the generation records; neither is on the path to the delivered dataset.
 
 ## The chunk queue
 
@@ -241,32 +247,149 @@ cents of redundant spend, not data loss.
 ## Generation
 
 ```bash
-python3 qa_generation/generate_qa_openrouter.py --max-chunks 20   # a quick sample first
+python3 qa_generation/generate_qa_openrouter.py --dry-run              # how many chunks are pending
+python3 qa_generation/generate_qa_openrouter.py --max-chunks 20        # a quick sample first
 python3 qa_generation/generate_qa_openrouter.py --budget-usd 25 --concurrency 16
 ```
 
 [run()](generate_qa_openrouter.py#L193-L245) calls Gemini through OpenRouter
 (reuses `OPENROUTER_API_KEY` from `.env`, same as
-`gemini_ocr_pipeline/run_ocr_openrouter.py`) with the prompt in
-[qa_config.QA_GENERATION_PROMPT_TEMPLATE](qa_config.py#L117-L161) (prompt
-version `v2`), requesting `--pairs-per-chunk` (default 3) QA pairs as a
-strict JSON list per chunk: `question`, `answer`, `question_type`, and an
-optional `reasoning` (null unless the question genuinely needs it).
-[parse_qa_response](generate_qa_openrouter.py#L68-L99) validates the result,
-including that optional field. Resumable via
-[process_chunk](generate_qa_openrouter.py#L149-L190): each attempted chunk
-is appended to `output/generations/<source>/<origin>-<document_id>.jsonl`, and a
-re-run skips `chunk_id`s already recorded there. `--source`, `--origin`,
-`--max-chunks`, and `--budget-usd` all narrow scope, so a small
-representative sample can be produced (and sent to the partner) well before
-the full run.
+`gemini_ocr_pipeline/run_ocr_openrouter.py`), one request per chunk, and
+appends one record per attempt to
+`output/generations/<source>/<origin>-<document_id>.jsonl`.
 
-[qa_config.OPENROUTER_MODEL](qa_config.py) defaults to
-`google/gemini-3.1-flash-lite`, overridable per run with `--model`. A pilot
-of 40 chunks each at 3 and 4 pairs found flash-lite returning the requested
-count on 39/40 chunks either way, with the fourth pair reading as a
-genuinely distinct question rather than filler, so
-[PAIRS_PER_CHUNK](qa_config.py) is 4.
+### Exactly what is sent to the model
+
+**There is no system message.** The entire instruction block below goes to
+OpenRouter as a *single* `{"role": "user"}` message; the `messages` array
+has exactly one element. This is worth stating plainly because
+`qa_config.py` also defines `QA_SYSTEM_PROMPT`, and the two are unrelated:
+
+| constant | who ever sees it |
+|---|---|
+| `QA_GENERATION_PROMPT_TEMPLATE` | **Gemini, at generation time.** The prompt below. Never appears in the delivered dataset. |
+| `QA_SYSTEM_PROMPT` / `QA_SYSTEM_PROMPT_NO_CONTEXT` | **Gemma, at fine-tune time.** Written into the `system` slot of the finished training records by `compile_qa_dataset.py`. Never sent to Gemini. |
+
+Confusing these is an easy way to "fix the prompt" and change nothing about
+what is generated, or vice versa.
+
+The generation prompt is
+[qa_config.QA_GENERATION_PROMPT_TEMPLATE](qa_config.py), currently version
+`v3` (recorded on every output record as `prompt_version`, so the corpus
+stays attributable if it changes again). Rendered with `n_pairs=4`, verbatim
+— reproduce it any time with
+`python3 -c "import qa_config as c; print(c.build_qa_prompt('<CHUNK TEXT>'))"`:
+
+```text
+You are building instruction-tuning data for a 100% pure Bahdini (Badini) Kurdish language model. Bahdini is spoken by people in Dohuk city and governorate.
+
+Below is one excerpt ("the context") from a Bahdini text. Write 4 question-answer pairs a person could ask about this excerpt, as if using it for reading comprehension / instruction fine-tuning.
+
+Rules:
+- CRITICAL DIALECT RULE: Both the question and the answer MUST be written in 100% pure Bahdini Kurdish (Arabic script) exactly as spoken in Dohuk. Do NOT mix in any Sorani words, phrases, or grammar. Do NOT use general Kurmanji vocabulary or Latin script. You must ensure the dialect is strictly pure Bahdini.
+- The answer must be grounded in the context: prefer extractive answers quoting or closely paraphrasing the text; reasonable inference/synthesis is fine for explanatory or summarization questions, but never introduce facts that are not supported by the context.
+- Do not ask about the excerpt's formatting, page numbers, or the fact that it is an excerpt.
+- Vary the question_type across the set; choose only from: factual, explanatory, summarization, definitional, inferential.
+- If the context is too short, garbled, or content-free to support 4 distinct, well-grounded questions, return fewer pairs (an empty list is fine) rather than inventing filler.
+- If answering the question genuinely requires connecting multiple details in the context or drawing a conclusion beyond a single stated fact, also fill in "reasoning": a brief step-by-step justification, in pure Bahdini Kurdish, for how the answer follows from the context. If the question is directly answerable by quoting or restating one explicit fact, set "reasoning" to null; do not pad it with filler.
+
+Output strict JSON only: a list of objects, no markdown fences, no commentary before or after. Each object must have exactly these keys:
+  "question": string
+  "answer": string
+  "question_type": one of ['factual', 'explanatory', 'summarization', 'definitional', 'inferential']
+  "reasoning": string or null (see rule above)
+
+Context:
+"""
+<CHUNK TEXT>
+"""
+```
+
+Two things to know before editing it:
+
+- The `one of ['factual', ...]` line renders a Python list repr, quotes and
+  all, because `build_qa_prompt` interpolates `QUESTION_TYPES` directly
+  while the bullet above it uses a `', '.join(...)`. Cosmetically sloppy and
+  harmless in practice (the model complies), but **do not tidy it
+  mid-corpus** — any edit to this template is a new `QA_PROMPT_VERSION`, and
+  bumping it part-way through leaves the delivered dataset generated under
+  two different instructions.
+- The dialect rule got its shouty phrasing in `v3` on purpose; see the
+  version history below.
+
+### Request parameters
+
+Set in [call_openrouter](generate_qa_openrouter.py#L102-L147):
+
+| field | value | why |
+|---|---|---|
+| `model` | `--model`, default [`OPENROUTER_MODEL`](qa_config.py) = `google/gemini-3.1-flash-lite` | see the pricing section below |
+| `temperature` | `0.7` | four pairs are requested in one call, so some sampling diversity is wanted; low temperature made the four read as restatements of each other |
+| `max_tokens` | `MAX_OUTPUT_TOKENS` = 2048 | four Bahdini pairs with reasoning run ~600 output tokens, so this is headroom, not a target |
+| `messages` | one `user` message, the prompt above | no system role, no JSON mode, no `response_format` — the format is enforced by the prompt and validated after the fact |
+| timeout | 180 s per attempt | |
+
+`google/gemini-3.1-flash-lite` was chosen over the `pro` tier after a pilot:
+40 chunks at 3 pairs and 40 at 4 pairs, flash-lite returned the full
+requested count on 39/40 either way, and the fourth pair read as a genuinely
+distinct question rather than filler — so
+[`PAIRS_PER_CHUNK`](qa_config.py) is **4** and the cheaper tier does the job.
+
+### Failure handling, and what counts as "done"
+
+[parse_qa_response](generate_qa_openrouter.py#L68-L99) strips any markdown
+fence, parses the JSON, and keeps only entries that have a non-empty
+`question`, a non-empty `answer`, and a `question_type` **in
+`QUESTION_TYPES`** — an individual malformed pair is dropped, it does not
+fail the chunk. Each record lands with one of four statuses:
+
+| status | meaning | retried on the next run? |
+|---|---|---|
+| `ok` | at least one valid pair | no |
+| `empty` | the model returned `[]` — the intended answer for a garbled or content-free chunk | no |
+| `parse_error` | response was not a JSON list, or every entry was malformed | **yes** |
+| `error` | HTTP/network failure after all retries | **yes** |
+
+That last column is the whole resume contract, and it is decided by
+[done_chunk_ids](generate_qa_openrouter.py#L74-L86), which admits only `ok`
+and `empty` to the done set. So re-running the script is always safe and
+always makes progress: finished work is skipped, failures are re-attempted,
+and a chunk that keeps failing simply accumulates records rather than
+blocking the queue. Ctrl-C is safe at any point — every completed chunk is
+already flushed to disk.
+
+Transport-level retries live in
+[call_openrouter](generate_qa_openrouter.py#L102-L147): `RETRY_ATTEMPTS = 5`
+with exponential backoff plus jitter (`2·2^n + rand(0,1)` seconds) on 429
+and 5xx. **402 and 403 are treated as terminal**, not retried — they mean
+credit exhausted or the key was rejected, and they set `state["stop"]`,
+which drains in-flight requests and ends the run rather than burning five
+backoff cycles per chunk against a dead key.
+
+### CLI reference
+
+| flag | default | notes |
+|---|---|---|
+| `--source` | all | repeatable, e.g. `--source facebook` |
+| `--origin` | all | `safe_extraction` or `ocr_corpus`, repeatable |
+| `--max-chunks` | all pending | for producing a review sample |
+| `--budget-usd` | none | stops dispatching once *this run's* estimated cost hits it — see the pricing section; it is per-run, not lifetime |
+| `--concurrency` | 8 | requests in flight |
+| `--batch-size` | 16 | chunks per `gather()`. This is a **barrier**: the next batch does not start until the slowest request in the current one returns, so keep it comfortably above `--concurrency` or the semaphore starves on stragglers |
+| `--pairs-per-chunk` | 4 | |
+| `--model` | `google/gemini-3.1-flash-lite` | add any new slug to `OPENROUTER_PRICING` first |
+| `--no-shuffle` | off | by default the queue is shuffled with a **fixed seed** (`random.Random(0)`), so a `--max-chunks`/`--budget-usd` cap yields a spread across all sources and documents instead of exhausting one source alphabetically. Fixed rather than random so the order is identical across resumes |
+| `--dry-run` | off | counts pending chunks, calls nothing |
+
+### Prompt version history
+
+| version | change |
+|---|---|
+| `v1` | initial: 3 pairs, context target 700 tokens, no `reasoning` field |
+| `v2` | added the optional `reasoning` field (only when the question genuinely needs multi-step justification), plus `CONTEXT_RATIO` and the 900-token context target, after the partner confirmed the token budget covers the prompt side only |
+| `v3` | **current.** Rewrote the dialect rule after review found Sorani and general-Kurmanji vocabulary leaking in. "Bahdini is the Kurmanji dialect written in Arabic script, spoken in the Duhok/Badinan region" became "spoken by people in Dohuk city and governorate", and the soft "must be written in Bahdini Kurdish … (do not switch to Sorani …)" became the explicit `CRITICAL DIALECT RULE` above, naming Sorani, general Kurmanji, and Latin script as separate prohibitions. Reasoning must also be pure Bahdini |
+
+All 41,467 records currently on disk are `v3`.
 
 ### Pricing is per model, and getting it wrong is not just cosmetic
 
@@ -286,13 +409,91 @@ spent about $93, looking for all the world like a completed run.
 When adding a model, add its row to `OPENROUTER_PRICING` and verify against
 that model's OpenRouter page. An unknown slug deliberately falls back to
 the most expensive known rate, so the failure mode is stopping early rather
-than overspending. Real measured rate for the current default is about
-**$296 for the full 246,515-chunk corpus**.
+than overspending.
+
+**The corrected model has since been validated end to end against a whole
+exhausted key.** Recomputing every record on disk from its stored token
+counts gives **$50.04**; OpenRouter's own `/api/v1/key` endpoint reports
+`usage: 50.0542` for the same key. That is a 0.03% error over 41,467 calls,
+so the projections below can be treated as real numbers rather than
+estimates. Extrapolated: about **$297 for the full 246,515-chunk corpus**.
 
 Note that generation records written before this fix carry an inflated
 `est_cost_usd`. Both `input_tokens` and `output_tokens` are stored
 correctly, so the field is recomputable; `dashboard.py` recomputes rather
-than trusting it.
+than trusting it. To check spend against the provider directly, without
+waiting for the dashboard to index:
+
+```bash
+curl -s https://openrouter.ai/api/v1/key \
+  -H "Authorization: Bearer $(grep '^OPENROUTER_API_KEY=' .env | cut -d= -f2-)"
+```
+
+## Run state, and resuming
+
+Recomputed from `output/generations/` (regenerate any time with the snippet
+at the end of this section):
+
+| | |
+|---|---|
+| chunks attempted | **41,467 of 246,515 — 16.8%** |
+| `ok` / `empty` / `parse_error` / `error` | 39,640 / 1,443 / 352 / 32 |
+| QA pairs produced | **158,343** (3.82 per attempted chunk) |
+| pairs carrying `reasoning` | 84,197 (53.2%) |
+| tokens in / out | 50.6M / 24.9M |
+| real spend | **$50.04**, against a $50 key that is now exhausted |
+| projected full corpus | ~$297 total, ~941,000 pairs |
+
+So finishing the remaining 205,048 chunks costs roughly **$247** on a fresh
+key. The 384 `parse_error`/`error` chunks are inside that number — they are
+re-attempted automatically, no separate pass needed.
+
+Resume command. `--budget-usd` is a guard rail here, not a target: the queue
+runs out at ~$247, well before a cap set at $400, so the run ends by
+finishing rather than by tripping the cap.
+
+```bash
+cd qa_generation
+python3 generate_qa_openrouter.py --concurrency 32 --batch-size 128 --budget-usd 400
+```
+
+Sizing those two: the last full session sustained ~230 chunks/min at
+`--concurrency 16`, which puts the remaining queue at about 15 hours.
+Doubling concurrency should roughly halve that; `--batch-size` has to grow
+with it because of the barrier noted in the CLI table. Watch the dashboard's
+error counter for the first few minutes after raising it — a rising
+`error`/`parse_error` share means OpenRouter is shedding load and the extra
+concurrency is buying nothing.
+
+One wrinkle if you audit the records by hand: **175 of them carry
+`model: "gemini-3.1-pro-self-antigravity"`**, from a one-off manual
+experiment on 2026-07-30, not from this script. They have no
+`input_tokens`/`output_tokens`, so they contribute $0 to every cost figure
+above, and they are the only source of the two off-list `question_type`
+values in the corpus (`descriptive` ×3, `comparative` ×1) — this script's
+parser would have rejected those. They are otherwise valid Bahdini pairs and
+are left in place; `compile_qa_dataset.py` does not re-validate
+`question_type`, so filter on it there if the partner wants strictly the
+five agreed types.
+
+```bash
+# regenerate the table above
+cd qa_generation && python3 - <<'PY'
+import glob, json, collections, qa_config as cfg
+tot=collections.Counter(); pairs=cost=tin=tout=reas=0
+for p in glob.glob(str(cfg.GENERATIONS_DIR/"*"/"*.jsonl")):
+    for line in open(p, encoding="utf-8"):
+        if not line.strip(): continue
+        r=json.loads(line); tot[r.get("status","error")]+=1
+        i,o=r.get("input_tokens") or 0, r.get("output_tokens") or 0
+        tin+=i; tout+=o; cost+=cfg.estimate_cost_usd(i,o,r.get("model"))
+        for q in r.get("qa_pairs") or []:
+            pairs+=1; reas+=bool(q.get("reasoning"))
+n=sum(tot.values())
+print(dict(tot), f"{n:,} chunks = {n/246515:.1%}", f"{pairs:,} pairs",
+      f"{reas:,} with reasoning", f"${cost:.2f}", f"proj ${cost/n*246515:.0f}")
+PY
+```
 
 ## Live monitoring
 
@@ -314,6 +515,129 @@ returns only records newer than the client's last sequence number. Measured
 on a live run that is 931 KB for a cold load versus about 2 KB per delta,
 which is what makes a 350 ms refresh interval reasonable. Stdlib only,
 binds `127.0.0.1`, about 26 MB resident.
+
+Bahdini text in the feed is set in **IBM Plex Sans Arabic**, self-hosted
+from [assets/](assets/) and served at `/fonts/` by the same process (no CDN,
+so it renders the same with no network). The default `ui-sans-serif` stack
+resolved Arabic script to whatever generic face the OS picked — Geeza Pro on
+macOS — which matters here specifically, because judging dialect purity
+means reading closely and the Kurdish-specific letters (ڕ ڵ ێ ڤ ۆ ە) are
+exactly where a generic face gets ambiguous. Plex Arabic is a real text
+face, is freely redistributable, and its shipped subset was checked
+codepoint by codepoint against those letters rather than assumed. Adobe
+Arabic and Calibri were both considered and rejected: proprietary, and not
+installed on this machine, so naming either in the stack would have silently
+fallen straight back through to the generic default it was meant to replace.
+Arabic-script blocks are also set larger and looser than the surrounding UI
+text, since the script has a smaller x-height at the same nominal size and
+stacks marks above and below the baseline.
+
+To swap the face, drop a `.woff2` in `assets/`, add its filename to
+`FONT_FILES` in [dashboard.py](dashboard.py), and point the `@font-face`
+`src` at it. Font requests are served by exact-name allowlist, not by
+joining the request path onto a directory, so `/fonts/../../.env` 404s.
+
+## Reviewing quality in a spreadsheet
+
+```bash
+python3 qa_generation/export_qa_csv.py
+python3 qa_generation/export_qa_csv.py --per-cell 100 --context-chars 1200
+```
+
+The dashboard is for watching a run; [export_qa_csv.py](export_qa_csv.py) is
+for sitting down with the output. It flattens every generated pair to one
+row **next to the context it was grounded in**, so a Bahdini speaker can
+judge dialect and grounding side by side without reading JSON. Two files
+land in `output/dataset/`:
+
+| file | rows | size | what it is |
+|---|---|---|---|
+| `qa_review_sample.csv` | 2,404 | 7.7 MB | `--per-cell` (default 60) rows from each `(source, question_type)` cell. **Start here** |
+| `qa_review_all.csv` | 158,343 | 507 MB | every pair. Fine for pandas, painful for Excel |
+
+The sample is stratified rather than a head or a flat random draw for a
+concrete reason: two telegram sources are ~70% of all pairs, so any
+unstratified sample is mostly those two and says nothing about `spirez` or
+`sh2_unicodefixed_bahdini`. Cells are filled with a fixed seed, so the same
+sample comes back on a re-run.
+
+Columns are `question`, `answer`, `reasoning`, `context`, and the provenance
+needed to chase anything suspicious back to its record (`source`, `origin`,
+`document_id`, `chunk_id`, `pair_index`, `model`, `prompt_version`, `ts`),
+plus three cheap review aids: `has_reasoning`, `question_chars`/
+`answer_chars`, and `latin_chars_in_answer`. That last one is the useful
+one — the prompt forbids Latin script outright, so a non-zero value is an
+objective, checkable violation rather than a matter of taste. Sort
+descending on it and the worst offenders surface immediately. **1.43% of
+answers (2,272) contain at least one Latin letter**; spot-checking whether
+those are genuine leakage or incidental (a Latin-script proper noun, a
+citation) is a good first review task.
+
+Written with a UTF-8 BOM (`encoding="utf-8-sig"`), which is load-bearing:
+Excel assumes the system legacy codepage for a BOM-less UTF-8 CSV and turns
+every Arabic-script cell into mojibake. Set the text columns to a Kurdish
+font once open — Excel's default will not be one.
+
+There is no dialect-purity column here on purpose. Sorani-vs-Bahdini is not
+separable by a character-class check, and a plausible-looking automated
+score shipped as a column would be worse than none: it would get trusted.
+That judgment is the reviewer's, which is what this file is for.
+
+### Open finding: Sorani contexts in the source corpus
+
+The first pass over `qa_review_sample.csv` turned up something the pipeline
+does not currently handle, and it is a corpus problem, not a generation
+problem. Some source **contexts are Sorani, not Bahdini**. An unambiguous
+example, `facebook`, chunk context reading
+`قەڵەمە پارکەرەکەی باوکم … بۆ وا بە کوڵ دەگریت؟` — Sorani orthography
+throughout (`ەکەی` definite suffix, `دەگریت` verb form).
+
+The generator behaves correctly when this happens: it obeys the dialect rule
+and writes the question and answer in Bahdini anyway. **The problem is at
+compile time.** `compile_qa_dataset.py` puts the raw chunk text into the
+user message for the ~70% `with_context` share, so a Sorani context ends up
+inside the training prompt of an otherwise-Bahdini record.
+
+Scale, screened with a crude marker-frequency heuristic over the 2,404-row
+sample (Sorani `ەکان`/`ەکەی`/`لە`/`دەکات` vs Kurmanji `ژ`/`دگەل`/`دڤێت`/
+`ئەڤ`), counted per unique chunk:
+
+| source | bahdini | mixed | sorani |
+|---|---|---|---|
+| facebook | 132 | 54 | **95** |
+| zcks | 176 | 51 | **55** |
+| pertokenbadini | 266 | 21 | 5 |
+| spirez | 241 | 22 | 6 |
+| sh2_unicodefixed_bahdini | 231 | 20 | 2 |
+| telegram_badini_book | 267 | 28 | 4 |
+| telegram_jihana_pertuken_pdf | 276 | 18 | 5 |
+| telegram_pertok_badini | 273 | 12 | 4 |
+
+Read this as a direction, not a measurement — the heuristic has no validated
+threshold, several markers (`بۆ`, `ئەم`) genuinely occur in both dialects,
+and "mixed" is as likely to mean "the heuristic is unsure" as "the text is
+mixed". What survives the caveats is the shape: contamination is
+**concentrated in `facebook` and `zcks`** (roughly a third and a fifth of
+their chunks) and near-absent in the five telegram/pertok book sources. That
+is consistent with their provenance — social posts and a mixed-dialect site
+versus curated Bahdini books.
+
+Not acted on yet, and deliberately not blocking the current run: the
+generated pairs themselves are fine, so nothing being spent now is wasted,
+and this is fixable after the fact at the compile step. Worth deciding
+before delivery:
+
+1. Have a Bahdini speaker check a stratified `facebook`/`zcks` slice of
+   `qa_review_sample.csv` and confirm the heuristic is pointing at real
+   Sorani, then calibrate a threshold against those labels.
+2. If confirmed, the cheap fix is at compile time — force the affected pairs
+   to `no_context` rather than dropping them, which keeps the Bahdini Q/A
+   and only discards the Sorani prompt text.
+3. The thorough fix is a dialect gate in `build_chunks.py`, alongside
+   `MIN_DOC_CHARS_PER_TOKEN`, applied per document like that one. Same
+   lesson as the corruption gates above: per-document, because dialect is a
+   property of the document, and a per-chunk cutoff would shred documents
+   on line-wrapping noise.
 
 ## Compiling the dataset
 

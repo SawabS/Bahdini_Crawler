@@ -24,6 +24,10 @@ record's stored est_cost_usd. Records written before the per-model pricing
 fix carry a 3.75x-inflated value for that field; recomputing repairs the
 history rather than displaying known-wrong totals.
 
+Bahdini text is set in IBM Plex Sans Arabic, self-hosted from assets/ and
+served at /fonts/ by this same process (see FONT_FILES) rather than pulled
+from a CDN, so the page renders identically with no network.
+
 Local only (binds 127.0.0.1), stdlib only.
 
     conda run --no-capture-output -n ai python -u qa_generation/dashboard.py
@@ -42,6 +46,23 @@ import qa_config as cfg
 
 PORT = 8765
 TOTAL_CHUNKS = 246_515          # qa_generation/output/chunks_report.md, post-fix corpus
+
+# IBM Plex Sans Arabic, self-hosted from assets/ and served at /fonts/*.
+# The default ui-sans-serif stack resolves Arabic-script text to whatever
+# generic fallback the OS picks (Geeza Pro on macOS), which is a legibility
+# problem here specifically: reviewing dialect purity means reading Bahdini
+# closely, and the Kurdish-specific letters (ێ ڤ ڕ ڵ ۆ ە) are exactly where
+# a mediocre face gets ambiguous. Plex Arabic is a real text face, covers
+# every one of those codepoints (verified against the shipped subset, not
+# assumed), and is the only weight-matched Arabic companion to a neutral UI
+# sans that is freely redistributable. Adobe Arabic and Calibri are both
+# proprietary and absent from this machine; relying on either would have
+# silently fallen through to the same generic default it replaces.
+ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+FONT_FILES = {
+    "ibm-plex-sans-arabic-400.woff2",
+    "ibm-plex-sans-arabic-600.woff2",
+}
 FEED_MAXLEN = 400               # server-side ring buffer of recent generations
 THROUGHPUT_MAXLEN = 180         # rolling samples for the throughput chart
 POLL_INTERVAL_S = 1.0           # how often the tailer looks for new bytes
@@ -215,6 +236,18 @@ PAGE = r"""<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>QA Generation Monitor</title>
 <style>
+  /* Served from qa_generation/assets/ by this same process; no CDN, so the
+     dashboard still renders correctly with no network. */
+  @font-face {
+    font-family: "Plex Arabic";
+    src: url("/fonts/ibm-plex-sans-arabic-400.woff2") format("woff2");
+    font-weight: 400; font-style: normal; font-display: swap;
+  }
+  @font-face {
+    font-family: "Plex Arabic";
+    src: url("/fonts/ibm-plex-sans-arabic-600.woff2") format("woff2");
+    font-weight: 600; font-style: normal; font-display: swap;
+  }
   :root {
     color-scheme: light;
     --bg: #f5f5f3; --surface: #fcfcfb; --surface-2: #ffffff; --border: #e6e5e0;
@@ -223,6 +256,10 @@ PAGE = r"""<!doctype html>
     --good: #0ca30c; --warn: #b07800; --crit: #d03b3b;
     --new-flash: rgba(42,120,214,.16);
     --radius: 12px;
+    /* The shipped subset is Arabic-script only, so Latin characters inside
+       an RTL run (a stray English word, digits) fall through to the UI sans
+       rather than rendering as tofu. */
+    --kurdish: "Plex Arabic", "SF Arabic", "Geeza Pro", ui-sans-serif, sans-serif;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
@@ -328,15 +365,21 @@ PAGE = r"""<!doctype html>
   .qa:first-of-type { border-top: none; padding-top: 0; }
   .qtype { display: inline-block; font-size: 9.5px; text-transform: uppercase; letter-spacing: .04em;
            color: var(--ink-3); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; margin-bottom: 5px; }
-  .rtl { direction: rtl; text-align: right; unicode-bidi: isolate; }
-  .q { font-size: 15px; font-weight: 550; line-height: 1.75; color: var(--ink); }
-  .a { font-size: 14.5px; line-height: 1.8; color: var(--ink-2); margin-top: 4px; }
-  .reason { font-size: 13px; line-height: 1.7; color: var(--ink-3); margin-top: 5px;
+  /* Arabic script has a smaller x-height than Latin at the same nominal
+     size and stacks diacritics above and below the baseline, so it is set
+     larger and looser here than the surrounding UI text -- otherwise the
+     marks that distinguish ڕ from ر, or ێ from ی, collide. */
+  .rtl { direction: rtl; text-align: right; unicode-bidi: isolate;
+         font-family: var(--kurdish); }
+  .q { font-size: 17px; font-weight: 600; line-height: 1.95; color: var(--ink); }
+  .a { font-size: 16px; font-weight: 400; line-height: 2.0; color: var(--ink-2); margin-top: 6px; }
+  .reason { font-size: 14.5px; line-height: 1.95; color: var(--ink-3); margin-top: 7px;
             border-inline-start: 2px solid var(--border); padding-inline-start: 10px; }
 
   table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
   th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); }
   th { color: var(--ink-3); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+  td.rtl { font-size: 15px; line-height: 1.9; }        /* same reason as .q/.a above */
   .hidden { display: none; }
   .muted { color: var(--ink-3); font-size: 12.5px; padding: 26px; text-align: center; }
 
@@ -739,17 +782,36 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass                                   # no per-request access spam
 
-    def _send(self, body: bytes, content_type: str) -> None:
+    def _send(self, body: bytes, content_type: str, cache: str = "no-store") -> None:
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache)
         self.end_headers()
         self.wfile.write(body)
+
+    def _send_font(self, name: str) -> bool:
+        # Allowlisted by exact name rather than path-joined from the request,
+        # so a crafted /fonts/../../.env cannot walk out of assets/.
+        if name not in FONT_FILES:
+            return False
+        try:
+            body = (ASSETS_DIR / name).read_bytes()
+        except OSError:
+            return False
+        # Immutable: the file only changes if someone swaps the asset, and a
+        # re-fetch on every 350ms-polling page load is pure waste.
+        self._send(body, "font/woff2", cache="public, max-age=31536000, immutable")
+        return True
 
     def do_GET(self):
         if self.path in ("/", "/index.html"):
             self._send(PAGE.encode("utf-8"), "text/html; charset=utf-8")
+        elif self.path.startswith("/fonts/"):
+            if not self._send_font(self.path[len("/fonts/"):].split("?")[0]):
+                self.send_response(404)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
         elif self.path.startswith("/api/delta"):
             since = 0
             if "since=" in self.path:
