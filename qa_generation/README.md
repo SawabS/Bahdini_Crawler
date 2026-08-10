@@ -429,41 +429,39 @@ curl -s https://openrouter.ai/api/v1/key \
   -H "Authorization: Bearer $(grep '^OPENROUTER_API_KEY=' .env | cut -d= -f2-)"
 ```
 
-## Run state, and resuming
+## Run state: complete
 
-Recomputed from `output/generations/` (regenerate any time with the snippet
-at the end of this section):
+The full corpus was generated over 2026-08-06 to 2026-08-10. Recomputed
+from `output/generations/` (regenerate any time with the snippet at the end
+of this section):
 
 | | |
 |---|---|
-| chunks attempted | **41,467 of 246,515 — 16.8%** |
-| `ok` / `empty` / `parse_error` / `error` | 39,640 / 1,443 / 352 / 32 |
-| QA pairs produced | **158,343** (3.82 per attempted chunk) |
-| pairs carrying `reasoning` | 84,197 (53.2%) |
-| tokens in / out | 50.6M / 24.9M |
-| real spend | **$50.04**, against a $50 key that is now exhausted |
-| projected full corpus | ~$297 total, ~941,000 pairs |
+| chunks covered | **246,515 of 246,515 — 100%** |
+| `ok` / `empty` / `parse_error` / `error` | 238,315 / 8,209 / 1,687 / 32 |
+| QA pairs produced | **952,822** (4.00 per `ok` chunk) |
+| pairs carrying `reasoning` | 508,070 (53.3%) |
+| total spend | **$301.41** across both keys |
 
-So finishing the remaining 205,048 chunks costs roughly **$247** on a fresh
-key. The 384 `parse_error`/`error` chunks are inside that number — they are
-re-attempted automatically, no separate pass needed.
+`empty` (3.3%) is the model correctly declining to invent pairs for a
+garbled or content-free chunk — the intended behaviour, not a failure.
+`parse_error` + `error` is 1,719 chunks, **0.7%**, that never yielded pairs.
 
-Resume command. `--budget-usd` is a guard rail here, not a target: the queue
-runs out at ~$247, well before a cap set at $400, so the run ends by
-finishing rather than by tripping the cap.
+Two notes on how the run ended. The overnight driver stopped at its
+`MAX_ATTEMPTS` cap of 40 with `pending = 1`: a single chunk fails to parse
+on every retry, so the loop could never reach zero. One chunk in 246,515 is
+not worth chasing, but that is why the log ends on the cap rather than on
+`queue empty`. Sustained throughput was ~450 chunks/min at `--concurrency
+32`, and the resume/retry path was exercised repeatedly across the 40
+attempts without producing duplicate pairs — `done_chunk_ids` held.
+
+To regenerate anything (a re-run is safe and idempotent; `ok`/`empty`
+chunks are skipped):
 
 ```bash
 cd qa_generation
 python3 generate_qa_openrouter.py --concurrency 32 --batch-size 128 --budget-usd 400
 ```
-
-Sizing those two: the last full session sustained ~230 chunks/min at
-`--concurrency 16`, which puts the remaining queue at about 15 hours.
-Doubling concurrency should roughly halve that; `--batch-size` has to grow
-with it because of the barrier noted in the CLI table. Watch the dashboard's
-error counter for the first few minutes after raising it — a rising
-`error`/`parse_error` share means OpenRouter is shedding load and the extra
-concurrency is buying nothing.
 
 ### Unattended / overnight runs
 
@@ -593,7 +591,7 @@ land in `output/dataset/`:
 | file | rows | size | what it is |
 |---|---|---|---|
 | `qa_review_sample.csv` | 2,404 | 7.7 MB | `--per-cell` (default 60) rows from each `(source, question_type)` cell. **Start here** |
-| `qa_review_all.csv` | 158,343 | 507 MB | every pair. Fine for pandas, painful for Excel |
+| `qa_review_all.csv` | 952,822 | 3.05 GB | every pair. Fine for pandas, hopeless in Excel |
 
 The sample is stratified rather than a head or a flat random draw for a
 concrete reason: two telegram sources are ~70% of all pairs, so any
@@ -609,7 +607,9 @@ plus three cheap review aids: `has_reasoning`, `question_chars`/
 one — the prompt forbids Latin script outright, so a non-zero value is an
 objective, checkable violation rather than a matter of taste. Sort
 descending on it and the worst offenders surface immediately. **1.43% of
-answers (2,272) contain at least one Latin letter**; spot-checking whether
+answers (13,593) contain at least one Latin letter** — measured at 1.43% on
+the 16.8%-complete corpus too, so the rate is stable and not a late-run
+artefact; spot-checking whether
 those are genuine leakage or incidental (a Latin-script proper noun, a
 citation) is a good first review task.
 
@@ -684,6 +684,45 @@ before delivery:
 ```bash
 python3 qa_generation/compile_qa_dataset.py --sample-size 20
 ```
+
+**Current output** (full corpus, ~40 s end to end):
+
+| file | size | contents |
+|---|---|---|
+| `output/dataset/qa_pairs.jsonl` | **2.55 GB** | 952,801 records — the deliverable |
+| `output/dataset/sample.jsonl` | 44 KB | 40 records, every `(question_type, context_mode)` combination |
+| `output/dataset/report.md` | — | counts and the prompt-length check |
+
+952,801 rather than the 952,822 pairs on record: 21 pairs reference 6
+chunk_ids that no longer exist in `chunks.jsonl`, orphaned when the corpus
+was rebuilt after the character-corruption fix. Measured split is 70.0%
+`with_context` / 30.0% `no_context`, matching `CONTEXT_RATIO` exactly, and
+mean prompt length is **584 tokens** against the partner's ~1,000 mean, with
+0.02% over the 1,300-token flag.
+
+### It streams, and it has to
+
+Both this and `export_qa_csv.py` were originally written against the pilot's
+~1,700 pairs and held everything in memory: all of `chunks.jsonl` as a dict
+(~1.1 GB) plus every finished record in a list (~2.5 GB). At the full
+corpus that is several GB of live objects, which does not fit alongside a
+16 GB machine's working set — the first attempt to run the CSV exporter at
+full scale had to be killed before it started swapping. Both now:
+
+- index `chunks.jsonl` by **byte offset** (~40 MB) and `seek()` per record,
+  the same approach `generate_qa_openrouter.py` already used on that file;
+- write each record as it is built rather than collecting it;
+- keep only bounded per-cell buffers for the samples — `export_qa_csv.py`
+  uses reservoir sampling, since it cannot hold the population to draw from.
+
+Result: 952k records in 37 s at flat memory, versus not completing at all.
+
+**The prompt-length check is sampled, and says so.** `count_prompt_tokens`
+renders the Gemma chat template per record; doing that for ~950k records is
+~2M template renders and takes hours, for a QC statistic a sample estimates
+fine. `--token-check-sample` (default 25,000) controls it, `0` tokenizes
+everything, and `report.md` states which coverage produced the number. This
+does not touch the deliverable — every record is still written.
 
 [build_record](compile_qa_dataset.py#L76-L103) wraps every generated
 `{question, answer, question_type, reasoning}` pair with its source chunk's
