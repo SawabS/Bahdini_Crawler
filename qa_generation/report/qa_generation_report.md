@@ -9,8 +9,8 @@ prepared by: [sawab.aziz@newrozholdings.com](mailto:sawab.aziz@newrozholdings.co
 > **What this document is**
 >
 > This is the single source of truth for the QA-generation stage of the Bahdini
-> Kurdish fine-tuning corpus. It begins where the chunking stage ended — with a
-> finished work queue of 246,515 text chunks — and follows every step from there
+> Kurdish fine-tuning corpus. It begins where the chunking stage ended, with a
+> finished work queue of 246,515 text chunks, and follows every step from there
 > to the delivered dataset, including the exact prompt sent to the model, every
 > token and dollar figure, the failure modes encountered, and the quality
 > problems that remain unresolved. Design decisions are recorded with the
@@ -95,7 +95,7 @@ A chunk is a contiguous passage of Bahdini text, packed paragraph-first to a
 target of 900 real Gemma tokens with a hard ceiling of 1,050 and a floor of 120.
 The target was not chosen for the generator's convenience: the partner specified
 a budget of roughly 1,000 tokens for the *prompt side* of a finished training
-record — system message plus question plus context, with the answer excluded —
+record (system message plus question plus context, with the answer excluded),
 expressed as a mean rather than a cap. Measuring the fixed overhead of Gemma's
 chat template at 77 tokens for a representative record left approximately 900
 tokens for context, which is where the target came from.
@@ -104,7 +104,7 @@ tokens for context, which is where the target came from.
 
 Every chunk id has the form `<origin>-<document_id>-<index>`. The origin prefix
 is load-bearing rather than decorative. The same source document can exist in
-both pools — native PDF text extraction and Gemini OCR of the same file — and
+both pools, native PDF text extraction and Gemini OCR of the same file, and
 both pools deliberately hash to the same `document_id` so that identifiers line
 up across pipelines. Before the prefix was added, 626 such documents produced
 colliding chunk ids: **41,457 duplicated ids spanning 82,914 chunks, 32.5% of
@@ -135,7 +135,7 @@ individual chunks in a genuinely clean document dip as low as 0.12.
 ![Chunks in the work queue, by source corpus](figures/fig_chunks_by_source.png)
 
 By origin the queue splits 166,169 chunks from the reviewed OCR corpus against
-80,346 from native extraction — roughly two to one in favour of OCR, because OCR
+80,346 from native extraction, roughly two to one in favour of OCR, because OCR
 reads the rendered page image and is therefore immune to the PDF font problems
 that sent so many native extractions to the reject pile.
 
@@ -145,11 +145,11 @@ that sent so many native extractions to the reject pile.
 
 ```mermaid
 flowchart TD
-    A[("chunks.jsonl — 246,515 chunks")] --> B["generate_qa_openrouter.py<br/>one API call per chunk"]
-    B --> C[("generations/*.jsonl — 248,243 records")]
+    A[("chunks.jsonl: 246,515 chunks")] --> B["generate_qa_openrouter.py<br/>one API call per chunk"]
+    B --> C[("generations/*.jsonl: 248,243 records")]
     C --> D["compile_qa_dataset.py<br/>assigns context mode"]
-    D --> E[("qa_pairs.jsonl — 952,801 records")]
-    E --> F["export/ — csv · parquet · outliers · stats"]
+    D --> E[("qa_pairs.jsonl: 952,801 records")]
+    E --> F["export/: csv · parquet · outliers · stats"]
     C -. "resume: skip ok / empty" .-> B
 ```
 
@@ -168,10 +168,10 @@ automatically on the next run without a separate pass.
 | Parameter | Value and reasoning |
 |---|---|
 | Model | `google/gemini-3.1-flash-lite` via OpenRouter |
-| Temperature | `0.7` — four pairs are requested in a single call, and lower temperatures made the four read as restatements of one another |
-| Max output tokens | `2048` — four Bahdini pairs with reasoning average 605 output tokens, so this is headroom, not a target |
+| Temperature | `0.7`: four pairs are requested in a single call, and lower temperatures made the four read as restatements of one another |
+| Max output tokens | `2048`: four Bahdini pairs with reasoning average 605 output tokens, so this is headroom, not a target |
 | Messages | *one* `user` message. No system role is sent |
-| Response format | none — no JSON mode; the schema is enforced by the prompt and validated after the fact |
+| Response format | none: no JSON mode; the schema is enforced by the prompt and validated after the fact |
 | Request timeout | 180 seconds per attempt |
 | Prompt version | `v3`, recorded on every output record |
 
@@ -226,7 +226,7 @@ Two details worth knowing before anyone edits this. First, the
 `one of ['factual', ...]` line renders a raw Python list repr, quotes included,
 because that value is interpolated directly while the bullet above it is
 comma-joined. It is cosmetically untidy and the model complies with it
-regardless — but tidying it mid-corpus would mean a new prompt version, and a
+regardless, but tidying it mid-corpus would mean a new prompt version, and a
 version bump part-way through leaves the delivered dataset generated under two
 different sets of instructions. Second, the shouty phrasing of the dialect rule
 is deliberate: version v2 said only "must be written in Bahdini Kurdish (do not
@@ -246,7 +246,7 @@ prohibitions separately and marks the rule critical.
 
 ![Pairs returned per successful call](figures/fig_pairs_per_call.png)
 
-Of 238,315 successful calls, 237,913 returned exactly the four pairs requested —
+Of 238,315 successful calls, 237,913 returned exactly the four pairs requested.
 **99.83%**. The parser accepts a variable count by design, so the handful that
 returned one, two, three or five pairs were kept rather than discarded. Five
 pairs is possible because the parser validates structure, not cardinality.
@@ -254,7 +254,7 @@ pairs is possible because the parser validates structure, not cardinality.
 | Status | Calls | Share | Meaning and retry behaviour |
 |---|---:|---:|---|
 | `ok` | 238,315 | 95.99% | at least one valid pair. Not retried |
-| `empty` | 8,209 | 3.31% | model returned `[]` — the intended answer for a garbled or content-free chunk. Not retried |
+| `empty` | 8,209 | 3.31% | model returned `[]`: the intended answer for a garbled or content-free chunk. Not retried |
 | `parse_error` | 1,687 | 0.68% | response was not a JSON list, or every entry was malformed. **Retried automatically** |
 | `error` | 32 | 0.01% | HTTP or network failure after five attempts. **Retried automatically** |
 
@@ -304,7 +304,7 @@ exits with work pending. That loop introduced one hazard worth recording: the
 generator's budget cap is evaluated *per run*, so a naive restart loop would
 silently reset the cap on every iteration. The supervisor therefore reads
 remaining credit back from the provider before each attempt and passes that,
-minus a small reserve, as that attempt's cap — so the ceiling tracks cumulative
+minus a small reserve, as that attempt's cap, so the ceiling tracks cumulative
 spend across restarts, with the provider's own key limit as a hard backstop
 underneath.
 
@@ -319,7 +319,7 @@ underneath.
 Mean consumption per call was 1,227 input and 605 output tokens. Total spend was
 **$301.41**: $0.316 per thousand pairs, or $0.00122 per source chunk.
 
-Pricing is keyed by exact model slug. It previously was not — a single pair of
+Pricing is keyed by exact model slug. It previously was not, a single pair of
 constants for the `pro` tier was applied to every run regardless of which model
 was actually called, which overstated `flash-lite` runs by a factor of 3.75. That
 was not merely a display error. **The budget cap is evaluated against this
@@ -387,7 +387,7 @@ They are dropped rather than delivered without their grounding text.
 ```
 
 For a `no_context` record the user message is only `Question: <question>`, and
-the system prompt switches to "Answer the question in Bahdini Kurdish" — dropping
+the system prompt switches to "Answer the question in Bahdini Kurdish", dropping
 "using the supplied context", which would be false when there is none. That
 second system string was a judgement call rather than a specified requirement,
 and is a one-line change if different wording is preferred.
@@ -435,7 +435,7 @@ reasoning touches at most a seventh of it.
 **The mean is the wrong summary for this dataset.** Record length is bimodal:
 bare-question records cluster near 90 tokens and context-carrying ones near 950,
 and the mean of 658 falls in the valley between them, describing almost no actual
-record. The two populations should be reported — and batched — separately.
+record. The two populations should be reported, and batched, separately.
 
 | Field | Min | p05 | Median | Mean | p95 | Max |
 |---|---:|---:|---:|---:|---:|---:|
@@ -444,7 +444,7 @@ record. The two populations should be reported — and batched — separately.
 | Whole record | 26 | 80 | 793 | 658 | 1,117 | 1,535 |
 
 Against the partner's roughly 1,000-token prompt-side mean, measured p95 is 992
-and only 27 records in the entire corpus exceed the 1,300-token flag threshold —
+and only 27 records in the entire corpus exceed the 1,300-token flag threshold.
 a 30% allowance over the target. The budget was met comfortably.
 
 ### Context modes
@@ -453,8 +453,8 @@ a 30% allowance over the target. The budget was met comfortably.
 
 The realised split is 667,214 `with_context` against 285,587 `no_context`:
 **70.03% / 29.97%**, matching the configured ratio of 0.7 to two decimal places.
-The two modes exist because the model will be served both ways —
-retrieval-augmented and bare — and a model trained only on context-bearing
+The two modes exist because the model will be served both ways
+(retrieval-augmented and bare), and a model trained only on context-bearing
 prompts tends to refuse or hedge when the context is absent. Both modes were
 generated with full context visible to the generator, so the bare-question pairs
 remain grounded in real source text even though that text is not shown at
@@ -517,16 +517,16 @@ single heuristic firing alone.
 ### Sorani source text
 
 The most consequential finding. Some source chunks are Sorani rather than
-Bahdini. The generator handles this correctly — it obeys the dialect rule and
+Bahdini. The generator handles this correctly, it obeys the dialect rule and
 writes the question and answer in Bahdini regardless. The leak is at compile
 time: for `with_context` records the raw chunk is placed in the user message, so
 Sorani text enters the training prompt of an otherwise-Bahdini record.
 
-> **Sorani context found in the facebook corpus** — chunk text, excerpt
+> **Sorani context found in the facebook corpus**, chunk text, excerpt
 >
 > <div dir="rtl">قەڵەمە پارکەرەکەی باوکم … بۆ وا بە کوڵ دەگریت؟</div>
 >
-> Sorani orthography throughout — the `ەکەی` definite suffix and the `دەگریت`
+> Sorani orthography throughout, the `ەکەی` definite suffix and the `دەگریت`
 > verb form are not Bahdini. The question and answer generated from this chunk
 > are correct Bahdini; the context beneath them is not.
 
@@ -535,7 +535,7 @@ Sorani text enters the training prompt of an otherwise-Bahdini record.
 Plotted as a rate rather than a count deliberately: by absolute count the large
 Telegram corpora appear worst simply because they contain 350,000 pairs each.
 Normalising shows the problem is concentrated in `facebook` (21.0%) and `zcks`
-(13.8%), an order of magnitude above the book corpora — which is consistent with
+(13.8%), an order of magnitude above the book corpora, which is consistent with
 provenance, since those two are social posts and a mixed-dialect website rather
 than curated Bahdini books. The same concentration appeared in an independent
 estimate made on a 2,404-row stratified sample when the corpus was only 17%
@@ -548,14 +548,14 @@ threshold is not calibrated.
 that forbids Latin script outright. The rate was also 1.43% when the corpus was
 17% complete, so this is structural rather than an artefact of the later run. The
 class is mixed: proper nouns and citations alongside genuine leakage. The tail is
-unambiguous — the worst single record carries 244 Latin characters, which turn
+unambiguous, the worst single record carries 244 Latin characters, which turn
 out to be Emily Dickinson's *"I never saw a moor"* sitting in the source text.
 
 ### Duplicate questions
 
 25,441 pairs (2.7%) repeat a question string seen earlier. **Do not deduplicate
-on the question alone.** The repeats are dominated by generic questions — the
-kind askable of almost any passage — which arise independently across unrelated
+on the question alone.** The repeats are dominated by generic questions, the
+kind askable of almost any passage, which arise independently across unrelated
 chunks and carry entirely different answers. Global deduplication on the question
 string would delete legitimately distinct training pairs. Deduplicate on the
 `(question, answer)` pair, or on question within a document.
@@ -587,7 +587,7 @@ and each has an inexpensive fix once decided.
    pairs to `no_context` rather than dropping them, which keeps the Bahdini
    question and answer and discards only the Sorani prompt text. The thorough fix
    is a per-document dialect gate in the chunking stage, applied the same way as
-   the existing corruption gate — per document, because dialect is a property of
+   the existing corruption gate, per document, because dialect is a property of
    the document and a per-chunk cutoff would shred documents on line-wrapping
    noise.
 
@@ -595,7 +595,7 @@ and each has an inexpensive fix once decided.
    is obviously wrong and the head is mostly proper nouns; a threshold somewhere
    between will do once someone reads twenty rows.
 
-4. **Deduplicate carefully.** On `(question, answer)` or within a document —
+4. **Deduplicate carefully.** On `(question, answer)` or within a document.
    never on the question string globally.
 
 5. **Stratify the evaluation split by source**, or it will measure two Telegram

@@ -57,7 +57,7 @@ a per-document chars/token check for legacy-font character soup, cp1252
 mojibake recovery, and private-use-area / C0 control-character handling.
 
 Pairs were generated with `google/gemini-3.1-flash-lite`, one call per chunk,
-under a prompt requiring strictly Bahdini output — no Sorani, no general
+under a prompt requiring strictly Bahdini output, no Sorani, no general
 Kurmanji, no Latin script.
 
 ## Known issues

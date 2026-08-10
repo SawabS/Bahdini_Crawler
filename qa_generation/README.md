@@ -184,7 +184,7 @@ scattered inside otherwise-clean chunks. Found by opening
 `output/chunks.jsonl` in a pager and noticing a boxed control-character
 glyph mixed into real Bahdini text; investigated in
 [`notebooks/investigate_chunk_control_chars.ipynb`](notebooks/investigate_chunk_control_chars.ipynb)
-(run with the `ai` conda kernel — has pandas/matplotlib/jupyter; the base
+(run with the `ai` conda kernel, has pandas/matplotlib/jupyter; the base
 env doesn't).
 
 **Original scope** (measured against the pre-fix `output/chunks.jsonl`):
@@ -193,23 +193,23 @@ genuine non-printable character. Three different mechanisms turned up,
 across two rounds of investigation:
 
 - **`Cc` cp1252 mojibake** (39 documents): PDF fonts using Windows'
-  `WinAnsiEncoding` (cp1252) — curly quotes, em-dashes — decoded without
+  `WinAnsiEncoding` (cp1252) (curly quotes, em-dashes), decoded without
   translation, so bytes `0x80`-`0x9F` survive as raw C1 control codes
   instead of the character they were meant to be. Deterministically
   recoverable via `bytes([n]).decode("cp1252")`.
 - **`Co` Private Use Area glyphs** (344 documents): custom/symbol/legacy
-  Kurdish fonts with no (or a broken) `ToUnicode` CMap in the PDF — the
+  Kurdish fonts with no (or a broken) `ToUnicode` CMap in the PDF, the
   same underlying "font glyph doesn't map to correct Unicode" problem
   behind the character-soup case above, just a different symptom. Of these,
   315 documents only showed PUA as standalone decoration (safe to strip);
-  29 showed it mid-word, between two Arabic-script letters — i.e. an
+  29 showed it mid-word, between two Arabic-script letters, i.e. an
   actual letter got silently replaced, the same class of bug
   `MIN_DOC_CHARS_PER_TOKEN` was built to catch, just invisible to that
   particular check.
 - **Raw C0 control codes** (found *after* the first fix pass, verifying the
   rebuilt corpus turned up a residual 307 chunks / 27 documents the fix
   above didn't touch): the same font-substitution failure landing in the
-  `0x00`-`0x1F` range instead — e.g. `رئی\x19\x19\x19\x19س` (repeated `0x19`
+  `0x00`-`0x1F` range instead, e.g. `رئی\x19\x19\x19\x19س` (repeated `0x19`
   clusters sitting mid-word). No cp1252-style recovery table applies to this
   range; unlike decorative PUA, a C0 control code has no legitimate
   standalone use in body text at all, so any occurrence is treated as a
@@ -218,27 +218,27 @@ across two rounds of investigation:
 **The through-line, and the one rule that matters for any future case like
 this**: never blanket-strip an unrecognized character class. `Co`/PUA had a
 genuine decorative-use majority (bullets) alongside real letter
-substitution — collapsing that distinction would have silently deleted real
+substitution, collapsing that distinction would have silently deleted real
 words in the 29 mid-word documents.
 
 **Why the existing gate misses this**: affected chunks' chars/token ratio
 (mean 1.84) sits only slightly below unaffected chunks (mean 2.02), nowhere
-near the 1.5 cutoff — a handful of stray characters gets averaged out by an
+near the 1.5 cutoff, a handful of stray characters gets averaged out by an
 otherwise-normal ~900-token chunk. `Cf`-category characters (`U+06DD`
 Arabic end-of-ayah, `U+200E`/`U+200F` bidi marks, `U+200D` ZWJ) look
 superficially similar under a naive "non-printable" scan but are legitimate
-Bahdini/Arabic-script content, not corruption — don't include `Cf` in any
+Bahdini/Arabic-script content, not corruption, don't include `Cf` in any
 future corruption check built from this.
 
 **Root cause, confirmed**: predates this pipeline entirely. The corrupted
 bytes are already present in `extractions/facebook/safe/*.txt` (the output
 of `scripts/extract_pipeline.py`'s `extract_pdf()`, from an earlier
-extraction run) — `pipeline/build_chunks.py` and `pipeline/generate_qa_openrouter.py` never
+extraction run), `pipeline/build_chunks.py` and `pipeline/generate_qa_openrouter.py` never
 touch byte-level encoding, only text/whitespace. `extract_pipeline.py`'s
 `clean_text()` runs NFKC + KLPT Kurdish normalization and nothing else; it
 has no handling for either corruption mechanism above. Confirmed by origin:
 11.66% of `safe_extraction`-origin chunks affected vs. 0.36% of
-`ocr_corpus`-origin chunks — almost exclusive to the native PDF text layer,
+`ocr_corpus`-origin chunks, almost exclusive to the native PDF text layer,
 since Gemini OCR reads the rendered page image and never depends on the
 PDF's internal font encoding.
 
@@ -249,35 +249,35 @@ PDF's internal font encoding.
 place and flags it; `count_stray_c0_controls()` flags any residual C0
 control code. Both flags route the whole document to `ocr_needed` via
 `classification()`, exactly like the existing `MIN_DOC_CHARS_PER_TOKEN`
-gate — this is now a permanent, first-class check, not a one-off patch, so
+gate, this is now a permanent, first-class check, not a one-off patch, so
 any future extraction run (a new crawl, a re-run) gets it automatically.
 
 Applied to the already-extracted corpus with
-[`scripts/backfill_char_corruption_fix.py`](../scripts/backfill_char_corruption_fix.py)
-— rewrites `extractions/*/safe/*.txt` in place using the fixed
+[`scripts/backfill_char_corruption_fix.py`](../scripts/backfill_char_corruption_fix.py),
+which rewrites `extractions/*/safe/*.txt` in place using the fixed
 `clean_text()`, refreshes each manifest record's stats, then calls
 `classify_source()` to physically move any newly-flagged document from
 `safe/` to `ocr_needed/`. Entirely local (re-processes already-extracted
-text, no PDF re-parsing, no network/API calls) — **$0**.
+text, no PDF re-parsing, no network/API calls), **$0**.
 
-**Before/after** (`output/chunks_report.md`, two backfill passes — cp1252 +
+**Before/after** (`output/chunks_report.md`, two backfill passes, cp1252 +
 PUA first, then the C0 extension after verification turned up the
 residual):
 
 | | before | after |
 |---|---|---|
 | documents seen | 5,370 | 5,219 (151 reclassified to `ocr_needed`) |
-| docs skipped as garbled (`MIN_DOC_CHARS_PER_TOKEN`) | 369 | 264 (105 *fewer* — stray characters were dragging otherwise-clean documents under the 1.5 cutoff; the fix rescued them) |
+| docs skipped as garbled (`MIN_DOC_CHARS_PER_TOKEN`) | 369 | 264 (105 *fewer*, stray characters were dragging otherwise-clean documents under the 1.5 cutoff; the fix rescued them) |
 | chunks written | 254,872 | 246,515 (-3.3%) |
 | context tokens | 189,053,622 | 183,119,057 (-3.1%) |
 | chunks with real corruption (`Cc`/`Co`/`Cs`, `safe_extraction` origin) | 10,026 (374 docs) | **0** |
-| chunks with real corruption (any origin) | 10,026 | 8, all in `ocr_corpus` — a separate, untouched pipeline (Gemini OCR doesn't depend on PDF font encoding, so this fix doesn't apply there; a different, much smaller, unrelated residual) |
+| chunks with real corruption (any origin) | 10,026 | 8, all in `ocr_corpus`: a separate, untouched pipeline (Gemini OCR doesn't depend on PDF font encoding, so this fix doesn't apply there; a different, much smaller, unrelated residual) |
 
 **Impact on the already-recorded pilot generation**: of 255 real chunk
 attempts recorded before the fix (`output/generations/`), 245 (96%) still
 match a `chunk_id` in the rebuilt `chunks.jsonl` and stay valid; 10 (4%)
 were orphaned by chunk-boundary shifts and will be silently regenerated as
-new pending chunks on the next `pipeline/generate_qa_openrouter.py` run — a few
+new pending chunks on the next `pipeline/generate_qa_openrouter.py` run, a few
 cents of redundant spend, not data loss.
 
 ## Generation
@@ -312,8 +312,8 @@ what is generated, or vice versa.
 The generation prompt is
 [qa_config.QA_GENERATION_PROMPT_TEMPLATE](qa_config.py), currently version
 `v3` (recorded on every output record as `prompt_version`, so the corpus
-stays attributable if it changes again). Rendered with `n_pairs=4`, verbatim
-— reproduce it any time with
+stays attributable if it changes again). Rendered with `n_pairs=4`, verbatim.
+Reproduce it any time with
 `python3 -c "import qa_config as c; print(c.build_qa_prompt('<CHUNK TEXT>'))"`:
 
 ```text
@@ -347,7 +347,7 @@ Two things to know before editing it:
   all, because `build_qa_prompt` interpolates `QUESTION_TYPES` directly
   while the bullet above it uses a `', '.join(...)`. Cosmetically sloppy and
   harmless in practice (the model complies), but **do not tidy it
-  mid-corpus** — any edit to this template is a new `QA_PROMPT_VERSION`, and
+  mid-corpus**, any edit to this template is a new `QA_PROMPT_VERSION`, and
   bumping it part-way through leaves the delivered dataset generated under
   two different instructions.
 - The dialect rule got its shouty phrasing in `v3` on purpose; see the
@@ -362,13 +362,13 @@ Set in [call_openrouter](pipeline/generate_qa_openrouter.py#L102-L147):
 | `model` | `--model`, default [`OPENROUTER_MODEL`](qa_config.py) = `google/gemini-3.1-flash-lite` | see the pricing section below |
 | `temperature` | `0.7` | four pairs are requested in one call, so some sampling diversity is wanted; low temperature made the four read as restatements of each other |
 | `max_tokens` | `MAX_OUTPUT_TOKENS` = 2048 | four Bahdini pairs with reasoning run ~600 output tokens, so this is headroom, not a target |
-| `messages` | one `user` message, the prompt above | no system role, no JSON mode, no `response_format` — the format is enforced by the prompt and validated after the fact |
+| `messages` | one `user` message, the prompt above | no system role, no JSON mode, no `response_format`: the format is enforced by the prompt and validated after the fact |
 | timeout | 180 s per attempt | |
 
 `google/gemini-3.1-flash-lite` was chosen over the `pro` tier after a pilot:
 40 chunks at 3 pairs and 40 at 4 pairs, flash-lite returned the full
 requested count on 39/40 either way, and the fourth pair read as a genuinely
-distinct question rather than filler — so
+distinct question rather than filler, so
 [`PAIRS_PER_CHUNK`](qa_config.py) is **4** and the cheaper tier does the job.
 
 ### Failure handling, and what counts as "done"
@@ -376,13 +376,13 @@ distinct question rather than filler — so
 [parse_qa_response](pipeline/generate_qa_openrouter.py#L68-L99) strips any markdown
 fence, parses the JSON, and keeps only entries that have a non-empty
 `question`, a non-empty `answer`, and a `question_type` **in
-`QUESTION_TYPES`** — an individual malformed pair is dropped, it does not
+`QUESTION_TYPES`**, an individual malformed pair is dropped, it does not
 fail the chunk. Each record lands with one of four statuses:
 
 | status | meaning | retried on the next run? |
 |---|---|---|
 | `ok` | at least one valid pair | no |
-| `empty` | the model returned `[]` — the intended answer for a garbled or content-free chunk | no |
+| `empty` | the model returned `[]`: the intended answer for a garbled or content-free chunk | no |
 | `parse_error` | response was not a JSON list, or every entry was malformed | **yes** |
 | `error` | HTTP/network failure after all retries | **yes** |
 
@@ -391,13 +391,13 @@ That last column is the whole resume contract, and it is decided by
 and `empty` to the done set. So re-running the script is always safe and
 always makes progress: finished work is skipped, failures are re-attempted,
 and a chunk that keeps failing simply accumulates records rather than
-blocking the queue. Ctrl-C is safe at any point — every completed chunk is
+blocking the queue. Ctrl-C is safe at any point, every completed chunk is
 already flushed to disk.
 
 Transport-level retries live in
 [call_openrouter](pipeline/generate_qa_openrouter.py#L102-L147): `RETRY_ATTEMPTS = 5`
 with exponential backoff plus jitter (`2·2^n + rand(0,1)` seconds) on 429
-and 5xx. **402 and 403 are treated as terminal**, not retried — they mean
+and 5xx. **402 and 403 are treated as terminal**, not retried, they mean
 credit exhausted or the key was rejected, and they set `state["stop"]`,
 which drains in-flight requests and ends the run rather than burning five
 backoff cycles per chunk against a dead key.
@@ -409,7 +409,7 @@ backoff cycles per chunk against a dead key.
 | `--source` | all | repeatable, e.g. `--source facebook` |
 | `--origin` | all | `safe_extraction` or `ocr_corpus`, repeatable |
 | `--max-chunks` | all pending | for producing a review sample |
-| `--budget-usd` | none | stops dispatching once *this run's* estimated cost hits it — see the pricing section; it is per-run, not lifetime |
+| `--budget-usd` | none | stops dispatching once *this run's* estimated cost hits it, see the pricing section; it is per-run, not lifetime |
 | `--concurrency` | 8 | requests in flight |
 | `--batch-size` | 16 | chunks per `gather()`. This is a **barrier**: the next batch does not start until the slowest request in the current one returns, so keep it comfortably above `--concurrency` or the semaphore starves on stragglers |
 | `--pairs-per-chunk` | 4 | |
@@ -473,14 +473,14 @@ of this section):
 
 | | |
 |---|---|
-| chunks covered | **246,515 of 246,515 — 100%** |
+| chunks covered | **246,515 of 246,515: 100%** |
 | `ok` / `empty` / `parse_error` / `error` | 238,315 / 8,209 / 1,687 / 32 |
 | QA pairs produced | **952,822** (4.00 per `ok` chunk) |
 | pairs carrying `reasoning` | 508,070 (53.3%) |
 | total spend | **$301.41** across both keys |
 
 `empty` (3.3%) is the model correctly declining to invent pairs for a
-garbled or content-free chunk — the intended behaviour, not a failure.
+garbled or content-free chunk, the intended behaviour, not a failure.
 `parse_error` + `error` is 1,719 chunks, **0.7%**, that never yielded pairs.
 
 Two notes on how the run ended. The overnight driver stopped at its
@@ -489,7 +489,7 @@ on every retry, so the loop could never reach zero. One chunk in 246,515 is
 not worth chasing, but that is why the log ends on the cap rather than on
 `queue empty`. Sustained throughput was ~450 chunks/min at `--concurrency
 32`, and the resume/retry path was exercised repeatedly across the 40
-attempts without producing duplicate pairs — `done_chunk_ids` held.
+attempts without producing duplicate pairs, `done_chunk_ids` held.
 
 To regenerate anything (a re-run is safe and idempotent; `ok`/`empty`
 chunks are skipped):
@@ -514,7 +514,7 @@ each of which actually bit:
 
 1. **Detachment.** A job started with `&` from a terminal or an agent
    session stays in that session's process group and is killed when the
-   session tears down — a full run was lost this way with no error anywhere,
+   session tears down, a full run was lost this way with no error anywhere,
    just a dead process. The launcher forks, calls `os.setsid()`, and execs,
    so the driver ends up with `PPID 1` and its own process group. Verify
    with `ps -o pid,ppid,pgid -p $(cat qa_generation/output/overnight.pid)`;
@@ -522,14 +522,14 @@ each of which actually bit:
 2. **Sleep.** The driver runs under `caffeinate -ims` (no idle, disk, or
    system sleep). `--status` reports the real assertion state from `pmset`,
    not just whether the process exists. **Closing a laptop lid sleeps the
-   machine regardless of caffeinate** — leave the lid open and stay on mains
+   machine regardless of caffeinate**, leave the lid open and stay on mains
    power, since `-s` only applies on AC.
 3. **Restarts, without a budget hole.** The generator's `--budget-usd` is
    *per run*, so a naive restart loop resets the cap every iteration. The
    driver instead reads `limit_remaining` back from OpenRouter before each
    attempt and passes that (minus a $3 reserve) as the cap, so it tracks
    cumulative spend across restarts. The key's server-side limit is the hard
-   backstop below that — 402 makes the generator stop cleanly.
+   backstop below that, 402 makes the generator stop cleanly.
 
 The loop ends by itself when the generator reports `0 pending`, and is
 bounded at `MAX_ATTEMPTS` (40) regardless. Tunables are environment
@@ -544,7 +544,7 @@ One wrinkle if you audit the records by hand: **175 of them carry
 experiment on 2026-07-30, not from this script. They have no
 `input_tokens`/`output_tokens`, so they contribute $0 to every cost figure
 above, and they are the only source of the two off-list `question_type`
-values in the corpus (`descriptive` ×3, `comparative` ×1) — this script's
+values in the corpus (`descriptive` ×3, `comparative` ×1), this script's
 parser would have rejected those. They are otherwise valid Bahdini pairs and
 are left in place; `pipeline/compile_qa_dataset.py` does not re-validate
 `question_type`, so filter on it there if the partner wants strictly the
@@ -593,8 +593,8 @@ binds `127.0.0.1`, about 26 MB resident.
 Bahdini text in the feed is set in **IBM Plex Sans Arabic**, self-hosted
 from [assets/](assets/) and served at `/fonts/` by the same process (no CDN,
 so it renders the same with no network). The default `ui-sans-serif` stack
-resolved Arabic script to whatever generic face the OS picked — Geeza Pro on
-macOS — which matters here specifically, because judging dialect purity
+resolved Arabic script to whatever generic face the OS picked, Geeza Pro on
+macOS, which matters here specifically, because judging dialect purity
 means reading closely and the Kurdish-specific letters (ڕ ڵ ێ ڤ ۆ ە) are
 exactly where a generic face gets ambiguous. Plex Arabic is a real text
 face, is freely redistributable, and its shipped subset was checked
@@ -640,10 +640,10 @@ needed to chase anything suspicious back to its record (`source`, `origin`,
 `document_id`, `chunk_id`, `pair_index`, `model`, `prompt_version`, `ts`),
 plus three cheap review aids: `has_reasoning`, `question_chars`/
 `answer_chars`, and `latin_chars_in_answer`. That last one is the useful
-one — the prompt forbids Latin script outright, so a non-zero value is an
+one, the prompt forbids Latin script outright, so a non-zero value is an
 objective, checkable violation rather than a matter of taste. Sort
 descending on it and the worst offenders surface immediately. **1.43% of
-answers (13,593) contain at least one Latin letter** — measured at 1.43% on
+answers (13,593) contain at least one Latin letter**, measured at 1.43% on
 the 16.8%-complete corpus too, so the rate is stable and not a late-run
 artefact; spot-checking whether
 those are genuine leakage or incidental (a Latin-script proper noun, a
@@ -652,7 +652,7 @@ citation) is a good first review task.
 Written with a UTF-8 BOM (`encoding="utf-8-sig"`), which is load-bearing:
 Excel assumes the system legacy codepage for a BOM-less UTF-8 CSV and turns
 every Arabic-script cell into mojibake. Set the text columns to a Kurdish
-font once open — Excel's default will not be one.
+font once open, Excel's default will not be one.
 
 There is no dialect-purity column here on purpose. Sorani-vs-Bahdini is not
 separable by a character-class check, and a plausible-looking automated
@@ -665,7 +665,7 @@ The first pass over `qa_review_sample.csv` turned up something the pipeline
 does not currently handle, and it is a corpus problem, not a generation
 problem. Some source **contexts are Sorani, not Bahdini**. An unambiguous
 example, `facebook`, chunk context reading
-`قەڵەمە پارکەرەکەی باوکم … بۆ وا بە کوڵ دەگریت؟` — Sorani orthography
+`قەڵەمە پارکەرەکەی باوکم … بۆ وا بە کوڵ دەگریت؟`: Sorani orthography
 throughout (`ەکەی` definite suffix, `دەگریت` verb form).
 
 The generator behaves correctly when this happens: it obeys the dialect rule
@@ -689,13 +689,13 @@ sample (Sorani `ەکان`/`ەکەی`/`لە`/`دەکات` vs Kurmanji `ژ`/`دگ�
 | telegram_jihana_pertuken_pdf | 276 | 18 | 5 |
 | telegram_pertok_badini | 273 | 12 | 4 |
 
-Read this as a direction, not a measurement — the heuristic has no validated
+Read this as a direction, not a measurement, the heuristic has no validated
 threshold, several markers (`بۆ`, `ئەم`) genuinely occur in both dialects,
 and "mixed" is as likely to mean "the heuristic is unsure" as "the text is
 mixed". What survives the caveats is the shape: contamination is
 **concentrated in `facebook` and `zcks`** (roughly a third and a fifth of
 their chunks) and near-absent in the five telegram/pertok book sources. That
-is consistent with their provenance — social posts and a mixed-dialect site
+is consistent with their provenance, social posts and a mixed-dialect site
 versus curated Bahdini books.
 
 Not acted on yet, and deliberately not blocking the current run: the
@@ -706,7 +706,7 @@ before delivery:
 1. Have a Bahdini speaker check a stratified `facebook`/`zcks` slice of
    `qa_review_sample.csv` and confirm the heuristic is pointing at real
    Sorani, then calibrate a threshold against those labels.
-2. If confirmed, the cheap fix is at compile time — force the affected pairs
+2. If confirmed, the cheap fix is at compile time, force the affected pairs
    to `no_context` rather than dropping them, which keeps the Bahdini Q/A
    and only discards the Sorani prompt text.
 3. The thorough fix is a dialect gate in `pipeline/build_chunks.py`, alongside
@@ -725,9 +725,9 @@ python3 qa_generation/pipeline/compile_qa_dataset.py --sample-size 20
 
 | file | size | contents |
 |---|---|---|
-| `output/dataset/qa_pairs.jsonl` | **2.55 GB** | 952,801 records — the deliverable |
+| `output/dataset/qa_pairs.jsonl` | **2.55 GB** | 952,801 records, the deliverable |
 | `output/dataset/sample.jsonl` | 44 KB | 40 records, every `(question_type, context_mode)` combination |
-| `output/dataset/report.md` | — | counts and the prompt-length check |
+| `output/dataset/report.md` |, | counts and the prompt-length check |
 
 952,801 rather than the 952,822 pairs on record: 21 pairs reference 6
 chunk_ids that no longer exist in `chunks.jsonl`, orphaned when the corpus
@@ -742,13 +742,13 @@ Both this and `export/export_qa_csv.py` were originally written against the pilo
 ~1,700 pairs and held everything in memory: all of `chunks.jsonl` as a dict
 (~1.1 GB) plus every finished record in a list (~2.5 GB). At the full
 corpus that is several GB of live objects, which does not fit alongside a
-16 GB machine's working set — the first attempt to run the CSV exporter at
+16 GB machine's working set, the first attempt to run the CSV exporter at
 full scale had to be killed before it started swapping. Both now:
 
 - index `chunks.jsonl` by **byte offset** (~40 MB) and `seek()` per record,
   the same approach `pipeline/generate_qa_openrouter.py` already used on that file;
 - write each record as it is built rather than collecting it;
-- keep only bounded per-cell buffers for the samples — `export/export_qa_csv.py`
+- keep only bounded per-cell buffers for the samples, `export/export_qa_csv.py`
   uses reservoir sampling, since it cannot hold the population to draw from.
 
 Result: 952k records in 37 s at flat memory, versus not completing at all.
@@ -758,7 +758,7 @@ renders the Gemma chat template per record; doing that for ~950k records is
 ~2M template renders and takes hours, for a QC statistic a sample estimates
 fine. `--token-check-sample` (default 25,000) controls it, `0` tokenizes
 everything, and `report.md` states which coverage produced the number. This
-does not touch the deliverable — every record is still written.
+does not touch the deliverable, every record is still written.
 
 [build_record](pipeline/compile_qa_dataset.py#L76-L103) wraps every generated
 `{question, answer, question_type, reasoning}` pair with its source chunk's
@@ -847,7 +847,7 @@ it as "the dataset in CSV form" would be wrong on all three counts.
 Columns are the JSONL content and nothing derived: `system`, `user`,
 `assistant`, `reasoning`, `document_id`, `chunk_id`, `source`,
 `question_type`, `context_mode`. `user` is kept whole rather than split into
-question/context columns — context is ~90% of the bytes, so carrying it
+question/context columns, context is ~90% of the bytes, so carrying it
 twice would nearly double a multi-GB file, and the joined string is what the
 model is trained on.
 
@@ -888,13 +888,13 @@ building this corpus into one reviewable CSV, `output/dataset/qa_outliers.csv`
 0-based line in `qa_pairs.jsonl`, so a decision made here maps back exactly:
 `sed -n "$((row_index+1))p" qa_pairs.jsonl`.
 
-Current counts — 103,357 rows flagged, **10.85%** of the dataset (a row can
+Current counts, 103,357 rows flagged, **10.85%** of the dataset (a row can
 carry several flags):
 
 | flag | rows | |
 |---|---|---|
 | `sorani_answer` | 41,512 | heuristic; the answer reads as Sorani |
-| `sorani_context` | 28,272 | heuristic; Sorani context inside a `with_context` prompt — the case that actually leaks into training |
+| `sorani_context` | 28,272 | heuristic; Sorani context inside a `with_context` prompt, the case that actually leaks into training |
 | `duplicate_question` | 25,441 | question string repeats an earlier row; `duplicate_of_row` points at the first |
 | `latin_in_answer` | 13,593 | objective violation of the prompt's Latin-script ban; `latin_sample` shows the substrings |
 | `offpipeline_model` | 391 | from the 175-chunk one-off experiment |
@@ -903,7 +903,7 @@ carry several flags):
 | `missing_context` | 0 | confirms the 21 orphaned pairs never entered the deliverable |
 
 **The two Sorani rows are the weakest numbers in that table** and should be
-read as "size of the queue to inspect", not "number of bad rows" — no
+read as "size of the queue to inspect", not "number of bad rows", no
 validated threshold, and markers like `بۆ`/`ئەم` occur in both dialects.
 `sorani_score` and `bahdini_score` are exposed as columns precisely so the
 cutoff can be re-judged in a spreadsheet. The honest next step is labelling a
@@ -911,8 +911,8 @@ few hundred by eye and calibrating against those labels. Highest-yield slice
 to start on: `flag_sorani_context=1` filtered to `facebook` and `zcks`.
 
 Two implementation notes. `long_prompt` requires tokenizing, so only records
-long enough to plausibly exceed 1,300 tokens are measured (`>= 1900` chars —
-chunks cap at 1,050 tokens and the document gate floors chars/token at 1.5,
+long enough to plausibly exceed 1,300 tokens are measured (`>= 1900` chars; chunks cap at 1,050 tokens and the document gate floors
+chars/token at 1.5,
 so nothing shorter can reach it); `--max-tokenize` caps the work and the
 script **says so in its output when the cap is hit**, since a silently
 truncated flag is worse than a slow one. And `duplicate_question` hashes
@@ -932,7 +932,7 @@ the repo's [SKILL.md](../SKILL.md) editorial system. It starts at the finished
 chunk queue and runs to the delivered dataset, carrying every measured number
 (API calls, billed input/output tokens, cost, status breakdown, token budget,
 distributions, composition, quality flags), the complete v3 prompt verbatim,
-and four TikZ diagrams — the end-to-end flow with its resume edge, the
+and four TikZ diagrams, the end-to-end flow with its resume edge, the
 status/retry state machine, the chunk→pairs→context-mode fan-out that explains
 how 246,515 chunks become 952,801 records, and the record anatomy.
 
@@ -960,7 +960,7 @@ Two deliberate deviations from `SKILL.md`, both to keep the document buildable:
 - **No `bidi` package.** It must load last and is known to conflict with
   `tcolorbox` and `tikz`, which this document uses heavily. The Kurdish
   excerpts are short self-contained runs, so they use XeTeX's own
-  `\beginR`/`\endR` via a `\kurd{}` macro instead — same rendering, no package
+  `\beginR`/`\endR` via a `\kurd{}` macro instead, same rendering, no package
   conflict.
 - **Guarded font fallbacks.** `\newfontfamily` on a missing font is a hard
   build failure, and `Noto Naskh Arabic`, `Poppins`, `Inter` and
