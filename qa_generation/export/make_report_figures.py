@@ -156,6 +156,11 @@ def main() -> int:
         ax.set_title(title, loc="left", fontsize=9.5, color=INK, pad=8)
     fig.suptitle("The 70/30 context split, and what it costs in tokens",
                  x=0.005, ha="left", fontsize=10.5, color=INK, y=1.06)
+    # Two side-by-side subplots each carry outside value labels on the right
+    # and tick labels on the left, so the default gap lets the left chart's
+    # "667,214" land on top of the right chart's "with_context". Widen it.
+    fig.tight_layout()
+    fig.subplots_adjust(wspace=0.55)
     save(fig, "fig_context_mode.png")
 
     # 5. Question types --------------------------------------------------------
