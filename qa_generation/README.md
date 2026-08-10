@@ -465,6 +465,46 @@ error counter for the first few minutes after raising it — a rising
 `error`/`parse_error` share means OpenRouter is shedding load and the extra
 concurrency is buying nothing.
 
+### Unattended / overnight runs
+
+```bash
+bash qa_generation/run_overnight_start.sh            # start, detached
+bash qa_generation/run_overnight_start.sh --status   # check on it
+bash qa_generation/run_overnight_start.sh --stop     # stop; progress is saved
+```
+
+[run_overnight_start.sh](run_overnight_start.sh) launches
+[run_overnight.sh](run_overnight.sh) and the dashboard, and exists because a
+plain backgrounded run does not survive the night. Three problems it solves,
+each of which actually bit:
+
+1. **Detachment.** A job started with `&` from a terminal or an agent
+   session stays in that session's process group and is killed when the
+   session tears down — a full run was lost this way with no error anywhere,
+   just a dead process. The launcher forks, calls `os.setsid()`, and execs,
+   so the driver ends up with `PPID 1` and its own process group. Verify
+   with `ps -o pid,ppid,pgid -p $(cat qa_generation/output/overnight.pid)`;
+   `PPID` must be 1. (macOS has no `setsid(1)`, hence the Python.)
+2. **Sleep.** The driver runs under `caffeinate -ims` (no idle, disk, or
+   system sleep). `--status` reports the real assertion state from `pmset`,
+   not just whether the process exists. **Closing a laptop lid sleeps the
+   machine regardless of caffeinate** — leave the lid open and stay on mains
+   power, since `-s` only applies on AC.
+3. **Restarts, without a budget hole.** The generator's `--budget-usd` is
+   *per run*, so a naive restart loop resets the cap every iteration. The
+   driver instead reads `limit_remaining` back from OpenRouter before each
+   attempt and passes that (minus a $3 reserve) as the cap, so it tracks
+   cumulative spend across restarts. The key's server-side limit is the hard
+   backstop below that — 402 makes the generator stop cleanly.
+
+The loop ends by itself when the generator reports `0 pending`, and is
+bounded at `MAX_ATTEMPTS` (40) regardless. Tunables are environment
+variables: `CONCURRENCY`, `BATCH_SIZE`, `MAX_ATTEMPTS`, `RESERVE_USD`,
+`COOLDOWN_S`.
+
+Logs land in `output/overnight_<timestamp>.log`, one line per attempt with
+credit and cap, plus the generator's own per-chunk output.
+
 One wrinkle if you audit the records by hand: **175 of them carry
 `model: "gemini-3.1-pro-self-antigravity"`**, from a one-off manual
 experiment on 2026-07-30, not from this script. They have no
