@@ -19,13 +19,13 @@
 # limit is the hard backstop underneath that: 402 makes the generator stop
 # cleanly rather than retry.
 #
-#   bash qa_generation/run_overnight_start.sh     # detached; the entry point
-#   bash qa_generation/run_overnight.sh           # foreground, for debugging
+#   bash qa_generation/monitor/run_overnight_start.sh     # detached; the entry point
+#   bash qa_generation/monitor/run_overnight.sh           # foreground, for debugging
 
 set -u
 
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-QA="$REPO/qa_generation"
+QA="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # qa_generation/
+REPO="$(cd "$QA/.." && pwd)"
 PY=/opt/miniconda3/envs/ai/bin/python
 LOG_DIR="$QA/output"
 LOG="${OVERNIGHT_LOG:-$LOG_DIR/overnight_$(date +%Y%m%d_%H%M%S).log}"
@@ -59,7 +59,7 @@ except Exception:
 say "=== overnight run starting ==="
 say "repo=$REPO  concurrency=$CONCURRENCY  batch=$BATCH_SIZE  max_attempts=$MAX_ATTEMPTS"
 
-cd "$QA" || { say "FATAL: cannot cd to $QA"; exit 1; }
+cd "$QA/pipeline" || { say "FATAL: cannot cd to $QA/pipeline"; exit 1; }
 
 attempt=0
 while [ "$attempt" -lt "$MAX_ATTEMPTS" ]; do

@@ -13,12 +13,13 @@
 # Closing a laptop lid still sleeps regardless of caffeinate, so leave the
 # lid open and the machine on mains power.
 #
-#   bash qa_generation/run_overnight_start.sh
-#   bash qa_generation/run_overnight_start.sh --status
-#   bash qa_generation/run_overnight_start.sh --stop
+#   bash qa_generation/monitor/run_overnight_start.sh
+#   bash qa_generation/monitor/run_overnight_start.sh --status
+#   bash qa_generation/monitor/run_overnight_start.sh --stop
 
 set -u
-QA="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MON="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # qa_generation/monitor/
+QA="$(cd "$MON/.." && pwd)"
 PY=/opt/miniconda3/envs/ai/bin/python
 PIDFILE="$QA/output/overnight.pid"
 DASH_PIDFILE="$QA/output/dashboard.pid"
@@ -96,10 +97,10 @@ PYEOF
 }
 
 detach "$QA/output/overnight_driver.out" \
-       caffeinate -ims /bin/bash "$QA/run_overnight.sh" > "$PIDFILE"
+       caffeinate -ims /bin/bash "$MON/run_overnight.sh" > "$PIDFILE"
 
 if ! curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8765/ 2>/dev/null; then
-  detach "$QA/output/dashboard.log" "$PY" -u "$QA/dashboard.py" > "$DASH_PIDFILE"
+  detach "$QA/output/dashboard.log" "$PY" -u "$MON/dashboard.py" > "$DASH_PIDFILE"
 fi
 
 sleep 3
@@ -108,5 +109,5 @@ echo "  generation pid : $(cat "$PIDFILE")"
 echo "  dashboard      : http://127.0.0.1:8765"
 echo "  log            : $(ls -t "$QA"/output/overnight_*.log 2>/dev/null | head -1)"
 echo
-echo "Check on it with : bash qa_generation/run_overnight_start.sh --status"
-echo "Stop it with     : bash qa_generation/run_overnight_start.sh --stop"
+echo "Check on it with : bash qa_generation/monitor/run_overnight_start.sh --status"
+echo "Stop it with     : bash qa_generation/monitor/run_overnight_start.sh --stop"

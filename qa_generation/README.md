@@ -18,29 +18,65 @@ actual number of tokens Gemma will see, not a character-based guess. See
 flowchart TD
     A["extractions/*/safe/*.txt<br/>native extraction"] --> C
     B["gemini_ocr_pipeline/output/corpus/<br/>Gemini OCR corpus, reviewed and accepted"] --> C
-    C["build_chunks.py"] --> D[("output/chunks.jsonl<br/>work queue, one row per chunk")]
-    D --> E["generate_qa_openrouter.py<br/>chunk to Gemini to QA pairs, resumable"]
+    C["pipeline/build_chunks.py"] --> D[("output/chunks.jsonl<br/>work queue, one row per chunk")]
+    D --> E["pipeline/generate_qa_openrouter.py<br/>chunk to Gemini to QA pairs, resumable"]
     E --> F[("output/generations/&lt;source&gt;/&lt;origin&gt;-&lt;doc_id&gt;.jsonl<br/>one record per chunk attempt")]
-    F --> G["compile_qa_dataset.py"]
-    G --> H[("output/dataset/qa_pairs.jsonl<br/>final messages+metadata JSONL")]
-    G --> I[("output/dataset/sample.jsonl<br/>first N records, for partner review")]
-    F -.-> J["dashboard.py<br/>live monitoring, tails F"]
-    F -.-> K["export_qa_csv.py"]
-    K -.-> L[("output/dataset/qa_review_*.csv<br/>flat pair+context CSV, human review")]
+    F --> G["pipeline/compile_qa_dataset.py"]
+    G --> H[("output/dataset/qa_pairs.jsonl<br/>THE DELIVERABLE<br/>messages+metadata JSONL")]
+    G --> I[("output/dataset/sample.jsonl<br/>40 records, partner review")]
+    H --> M["export/export_dataset_table.py"]
+    M --> N[("qa_pairs.csv + parquet/<br/>same rows, table encodings")]
+    H --> O["export/export_outliers.py"]
+    O --> P[("qa_outliers.csv<br/>every flagged pair")]
+    H --> Q["export/compute_dataset_stats.py"]
+    Q --> R[("stats.json<br/>real token counts")]
+    F -.-> J["monitor/dashboard.py<br/>live monitoring, tails F"]
 ```
 
-`dashboard.py` and `export_qa_csv.py` (dashed) are read-only observers of
-the generation records; neither is on the path to the delivered dataset.
+Everything under `export/` reads the **deliverable**, not the generation
+records, so its outputs correspond to `qa_pairs.jsonl` row for row.
+`monitor/dashboard.py` (dashed) is a read-only observer of the generation
+records and is not on the path to the dataset.
+
+## Layout
+
+```text
+qa_generation/
+  qa_config.py          shared config: prompt, pricing, paths, thresholds
+  gemma_tokenizer.py    real google/gemma-4-31B-it token counts
+  pipeline/             the build path, in order
+    build_chunks.py         corpus -> output/chunks.jsonl
+    generate_qa_openrouter.py   chunks -> output/generations/ (resumable)
+    compile_qa_dataset.py       generations -> output/dataset/qa_pairs.jsonl
+  export/               derived artifacts, all read the deliverable
+    export_dataset_table.py     -> qa_pairs.csv, parquet/ (1:1, --verify)
+    export_outliers.py          -> qa_outliers.csv (8 quality flags)
+    compute_dataset_stats.py    -> stats.json (token counts, distributions)
+    export_qa_csv.py            -> review sheet from the raw generations
+  monitor/
+    dashboard.py            live web dashboard, http://127.0.0.1:8765
+    run_overnight_start.sh  detached unattended run (entry point)
+    run_overnight.sh        the supervised loop it launches
+  notebooks/            investigations
+  assets/               self-hosted webfont for the dashboard
+  output/               all generated data (gitignored)
+```
+
+`qa_config.py` and `gemma_tokenizer.py` stay at the top level because every
+subdirectory imports them; the scripts add the parent to `sys.path`
+themselves, so each stays runnable directly from anywhere
+(`python3 qa_generation/export/export_outliers.py`) rather than only from
+its own directory.
 
 ## The chunk queue
 
 ```bash
-python3 qa_generation/build_chunks.py
+python3 qa_generation/pipeline/build_chunks.py
 ```
 
 Source pool, by design (see
-[discover_safe_docs](build_chunks.py#L129-L151) and
-[discover_ocr_docs](build_chunks.py#L152-L173)), both included
+[discover_safe_docs](pipeline/build_chunks.py#L129-L151) and
+[discover_ocr_docs](pipeline/build_chunks.py#L152-L173)), both included
 unconditionally:
 
 - `extractions/<source>/safe/*.txt`: native PDF text extraction, classified
@@ -50,12 +86,12 @@ unconditionally:
   [gemini_ocr_pipeline/README.md](../gemini_ocr_pipeline/README.md) and
   [docs/DOCUMENT_AI_OCR_GUIDE.md](../docs/DOCUMENT_AI_OCR_GUIDE.md)'s Stage D).
 
-Chunking is paragraph-aware: [split_paragraphs](build_chunks.py#L37-L46)
+Chunking is paragraph-aware: [split_paragraphs](pipeline/build_chunks.py#L37-L46)
 splits on the extraction pipeline's page-break `\f` markers, then blank
-lines. [chunk_text](build_chunks.py#L87-L128) then greedily packs paragraphs
+lines. [chunk_text](pipeline/build_chunks.py#L87-L128) then greedily packs paragraphs
 up to [qa_config.TARGET_CHUNK_TOKENS](qa_config.py#L50-L63) (900, cap 1050,
-floor 120), and [hard_split](build_chunks.py#L59-L86) with
-[token_hard_cut](build_chunks.py#L47-L58) handle the rare oversized
+floor 120), and [hard_split](pipeline/build_chunks.py#L59-L86) with
+[token_hard_cut](pipeline/build_chunks.py#L47-L58) handle the rare oversized
 paragraph. Sized so the *prompt* side of a QA record (system + question +
 context) lands near the partner's ~1,000-token mean; see "Confirmed with the
 partner" below for why the answer isn't part of that budget.
@@ -66,7 +102,7 @@ no model weights needed, just the tokenizer files) and every
 chunk/paragraph/sentence is tokenized for real while packing, via
 [count_tokens_batch](gemma_tokenizer.py#L66-L74) so a full run over the
 corpus takes a few minutes (batched per document, see
-[build_chunks.py main()](build_chunks.py#L174-L260)). This replaced an
+[build_chunks.py main()](pipeline/build_chunks.py#L174-L260)). This replaced an
 earlier char-based estimate ([qa_config.CHARS_PER_TOKEN](qa_config.py#L24-L49))
 that assumed ~3.2 chars/token from a generic words/chars rule of thumb;
 measured against the real tokenizer, Bahdini Arabic-script text actually
@@ -110,7 +146,7 @@ rejected: one genuinely garbled document had individual chunks ranging from
 have let a lot of it through. The per-document **median** across a
 document's own chunks is what actually separates cleanly, so
 [qa_config.MIN_DOC_CHARS_PER_TOKEN](qa_config.py#L65-L81) (1.5) gates whole
-documents in [build_chunks.py main()](build_chunks.py#L209-L215), reusing
+documents in [build_chunks.py main()](pipeline/build_chunks.py#L209-L215), reusing
 the token counts already computed for chunk sizing -- no extra tokenizer
 calls.
 
@@ -129,14 +165,14 @@ re-transcribes some "safe"-sources for consistency, per its own README), and
 `chunk_id` used to be built from `document_id` alone -- so for those 626
 documents, a `safe_extraction` chunk and an `ocr_corpus` chunk could end up
 with the identical `chunk_id`. That would have silently corrupted
-`compile_qa_dataset.py`'s chunk-text lookup (a plain `dict` keyed by
-`chunk_id`) and `generate_qa_openrouter.py`'s resumability tracking (both
+`pipeline/compile_qa_dataset.py`'s chunk-text lookup (a plain `dict` keyed by
+`chunk_id`) and `pipeline/generate_qa_openrouter.py`'s resumability tracking (both
 origins' generation attempts landing in the same per-document file). Found
 by checking chunk_ids for collisions after the quality-gate rebuild: **41,457
 colliding ids across 82,914 chunks, 32.5% of the whole queue.** Fixed by
-including `origin` in both the chunk_id (`build_chunks.py` line 219) and the
+including `origin` in both the chunk_id (`pipeline/build_chunks.py` line 219) and the
 per-document generation file name (`output/generations/<source>/<origin>-<document_id>.jsonl`,
-`generate_qa_openrouter.py`); verified zero collisions in the current
+`pipeline/generate_qa_openrouter.py`); verified zero collisions in the current
 254,872-chunk file.
 
 ## A third corruption class: stray control/PUA characters (fixed)
@@ -147,7 +183,7 @@ cause that it does not catch: individual stray non-printable characters
 scattered inside otherwise-clean chunks. Found by opening
 `output/chunks.jsonl` in a pager and noticing a boxed control-character
 glyph mixed into real Bahdini text; investigated in
-[`investigate_chunk_control_chars.ipynb`](investigate_chunk_control_chars.ipynb)
+[`notebooks/investigate_chunk_control_chars.ipynb`](notebooks/investigate_chunk_control_chars.ipynb)
 (run with the `ai` conda kernel — has pandas/matplotlib/jupyter; the base
 env doesn't).
 
@@ -197,7 +233,7 @@ future corruption check built from this.
 **Root cause, confirmed**: predates this pipeline entirely. The corrupted
 bytes are already present in `extractions/facebook/safe/*.txt` (the output
 of `scripts/extract_pipeline.py`'s `extract_pdf()`, from an earlier
-extraction run) — `build_chunks.py` and `generate_qa_openrouter.py` never
+extraction run) — `pipeline/build_chunks.py` and `pipeline/generate_qa_openrouter.py` never
 touch byte-level encoding, only text/whitespace. `extract_pipeline.py`'s
 `clean_text()` runs NFKC + KLPT Kurdish normalization and nothing else; it
 has no handling for either corruption mechanism above. Confirmed by origin:
@@ -241,18 +277,18 @@ residual):
 attempts recorded before the fix (`output/generations/`), 245 (96%) still
 match a `chunk_id` in the rebuilt `chunks.jsonl` and stay valid; 10 (4%)
 were orphaned by chunk-boundary shifts and will be silently regenerated as
-new pending chunks on the next `generate_qa_openrouter.py` run — a few
+new pending chunks on the next `pipeline/generate_qa_openrouter.py` run — a few
 cents of redundant spend, not data loss.
 
 ## Generation
 
 ```bash
-python3 qa_generation/generate_qa_openrouter.py --dry-run              # how many chunks are pending
-python3 qa_generation/generate_qa_openrouter.py --max-chunks 20        # a quick sample first
-python3 qa_generation/generate_qa_openrouter.py --budget-usd 25 --concurrency 16
+python3 qa_generation/pipeline/generate_qa_openrouter.py --dry-run              # how many chunks are pending
+python3 qa_generation/pipeline/generate_qa_openrouter.py --max-chunks 20        # a quick sample first
+python3 qa_generation/pipeline/generate_qa_openrouter.py --budget-usd 25 --concurrency 16
 ```
 
-[run()](generate_qa_openrouter.py#L193-L245) calls Gemini through OpenRouter
+[run()](pipeline/generate_qa_openrouter.py#L193-L245) calls Gemini through OpenRouter
 (reuses `OPENROUTER_API_KEY` from `.env`, same as
 `gemini_ocr_pipeline/run_ocr_openrouter.py`), one request per chunk, and
 appends one record per attempt to
@@ -268,7 +304,7 @@ has exactly one element. This is worth stating plainly because
 | constant | who ever sees it |
 |---|---|
 | `QA_GENERATION_PROMPT_TEMPLATE` | **Gemini, at generation time.** The prompt below. Never appears in the delivered dataset. |
-| `QA_SYSTEM_PROMPT` / `QA_SYSTEM_PROMPT_NO_CONTEXT` | **Gemma, at fine-tune time.** Written into the `system` slot of the finished training records by `compile_qa_dataset.py`. Never sent to Gemini. |
+| `QA_SYSTEM_PROMPT` / `QA_SYSTEM_PROMPT_NO_CONTEXT` | **Gemma, at fine-tune time.** Written into the `system` slot of the finished training records by `pipeline/compile_qa_dataset.py`. Never sent to Gemini. |
 
 Confusing these is an easy way to "fix the prompt" and change nothing about
 what is generated, or vice versa.
@@ -319,7 +355,7 @@ Two things to know before editing it:
 
 ### Request parameters
 
-Set in [call_openrouter](generate_qa_openrouter.py#L102-L147):
+Set in [call_openrouter](pipeline/generate_qa_openrouter.py#L102-L147):
 
 | field | value | why |
 |---|---|---|
@@ -337,7 +373,7 @@ distinct question rather than filler — so
 
 ### Failure handling, and what counts as "done"
 
-[parse_qa_response](generate_qa_openrouter.py#L68-L99) strips any markdown
+[parse_qa_response](pipeline/generate_qa_openrouter.py#L68-L99) strips any markdown
 fence, parses the JSON, and keeps only entries that have a non-empty
 `question`, a non-empty `answer`, and a `question_type` **in
 `QUESTION_TYPES`** — an individual malformed pair is dropped, it does not
@@ -351,7 +387,7 @@ fail the chunk. Each record lands with one of four statuses:
 | `error` | HTTP/network failure after all retries | **yes** |
 
 That last column is the whole resume contract, and it is decided by
-[done_chunk_ids](generate_qa_openrouter.py#L74-L86), which admits only `ok`
+[done_chunk_ids](pipeline/generate_qa_openrouter.py#L74-L86), which admits only `ok`
 and `empty` to the done set. So re-running the script is always safe and
 always makes progress: finished work is skipped, failures are re-attempted,
 and a chunk that keeps failing simply accumulates records rather than
@@ -359,7 +395,7 @@ blocking the queue. Ctrl-C is safe at any point — every completed chunk is
 already flushed to disk.
 
 Transport-level retries live in
-[call_openrouter](generate_qa_openrouter.py#L102-L147): `RETRY_ATTEMPTS = 5`
+[call_openrouter](pipeline/generate_qa_openrouter.py#L102-L147): `RETRY_ATTEMPTS = 5`
 with exponential backoff plus jitter (`2·2^n + rand(0,1)` seconds) on 429
 and 5xx. **402 and 403 are treated as terminal**, not retried — they mean
 credit exhausted or the key was rejected, and they set `state["stop"]`,
@@ -420,7 +456,7 @@ estimates. Extrapolated: about **$297 for the full 246,515-chunk corpus**.
 
 Note that generation records written before this fix carry an inflated
 `est_cost_usd`. Both `input_tokens` and `output_tokens` are stored
-correctly, so the field is recomputable; `dashboard.py` recomputes rather
+correctly, so the field is recomputable; `monitor/dashboard.py` recomputes rather
 than trusting it. To check spend against the provider directly, without
 waiting for the dashboard to index:
 
@@ -459,20 +495,20 @@ To regenerate anything (a re-run is safe and idempotent; `ok`/`empty`
 chunks are skipped):
 
 ```bash
-cd qa_generation
+cd qa_generation/pipeline
 python3 generate_qa_openrouter.py --concurrency 32 --batch-size 128 --budget-usd 400
 ```
 
 ### Unattended / overnight runs
 
 ```bash
-bash qa_generation/run_overnight_start.sh            # start, detached
-bash qa_generation/run_overnight_start.sh --status   # check on it
-bash qa_generation/run_overnight_start.sh --stop     # stop; progress is saved
+bash qa_generation/monitor/run_overnight_start.sh            # start, detached
+bash qa_generation/monitor/run_overnight_start.sh --status   # check on it
+bash qa_generation/monitor/run_overnight_start.sh --stop     # stop; progress is saved
 ```
 
-[run_overnight_start.sh](run_overnight_start.sh) launches
-[run_overnight.sh](run_overnight.sh) and the dashboard, and exists because a
+[run_overnight_start.sh](monitor/run_overnight_start.sh) launches
+[run_overnight.sh](monitor/run_overnight.sh) and the dashboard, and exists because a
 plain backgrounded run does not survive the night. Three problems it solves,
 each of which actually bit:
 
@@ -510,7 +546,7 @@ experiment on 2026-07-30, not from this script. They have no
 above, and they are the only source of the two off-list `question_type`
 values in the corpus (`descriptive` ×3, `comparative` ×1) — this script's
 parser would have rejected those. They are otherwise valid Bahdini pairs and
-are left in place; `compile_qa_dataset.py` does not re-validate
+are left in place; `pipeline/compile_qa_dataset.py` does not re-validate
 `question_type`, so filter on it there if the partner wants strictly the
 five agreed types.
 
@@ -536,7 +572,7 @@ PY
 ## Live monitoring
 
 ```bash
-python3 qa_generation/dashboard.py     # http://127.0.0.1:8765
+python3 qa_generation/monitor/dashboard.py     # http://127.0.0.1:8765
 ```
 
 An interactive local dashboard for watching a long run: streaming feed of
@@ -571,18 +607,18 @@ text, since the script has a smaller x-height at the same nominal size and
 stacks marks above and below the baseline.
 
 To swap the face, drop a `.woff2` in `assets/`, add its filename to
-`FONT_FILES` in [dashboard.py](dashboard.py), and point the `@font-face`
+`FONT_FILES` in [dashboard.py](monitor/dashboard.py), and point the `@font-face`
 `src` at it. Font requests are served by exact-name allowlist, not by
 joining the request path onto a directory, so `/fonts/../../.env` 404s.
 
 ## Reviewing quality in a spreadsheet
 
 ```bash
-python3 qa_generation/export_qa_csv.py
-python3 qa_generation/export_qa_csv.py --per-cell 100 --context-chars 1200
+python3 qa_generation/export/export_qa_csv.py
+python3 qa_generation/export/export_qa_csv.py --per-cell 100 --context-chars 1200
 ```
 
-The dashboard is for watching a run; [export_qa_csv.py](export_qa_csv.py) is
+The dashboard is for watching a run; [export_qa_csv.py](export/export_qa_csv.py) is
 for sitting down with the output. It flattens every generated pair to one
 row **next to the context it was grounded in**, so a Bahdini speaker can
 judge dialect and grounding side by side without reading JSON. Two files
@@ -634,7 +670,7 @@ throughout (`ەکەی` definite suffix, `دەگریت` verb form).
 
 The generator behaves correctly when this happens: it obeys the dialect rule
 and writes the question and answer in Bahdini anyway. **The problem is at
-compile time.** `compile_qa_dataset.py` puts the raw chunk text into the
+compile time.** `pipeline/compile_qa_dataset.py` puts the raw chunk text into the
 user message for the ~70% `with_context` share, so a Sorani context ends up
 inside the training prompt of an otherwise-Bahdini record.
 
@@ -673,7 +709,7 @@ before delivery:
 2. If confirmed, the cheap fix is at compile time — force the affected pairs
    to `no_context` rather than dropping them, which keeps the Bahdini Q/A
    and only discards the Sorani prompt text.
-3. The thorough fix is a dialect gate in `build_chunks.py`, alongside
+3. The thorough fix is a dialect gate in `pipeline/build_chunks.py`, alongside
    `MIN_DOC_CHARS_PER_TOKEN`, applied per document like that one. Same
    lesson as the corruption gates above: per-document, because dialect is a
    property of the document, and a per-chunk cutoff would shred documents
@@ -682,7 +718,7 @@ before delivery:
 ## Compiling the dataset
 
 ```bash
-python3 qa_generation/compile_qa_dataset.py --sample-size 20
+python3 qa_generation/pipeline/compile_qa_dataset.py --sample-size 20
 ```
 
 **Current output** (full corpus, ~40 s end to end):
@@ -702,7 +738,7 @@ mean prompt length is **584 tokens** against the partner's ~1,000 mean, with
 
 ### It streams, and it has to
 
-Both this and `export_qa_csv.py` were originally written against the pilot's
+Both this and `export/export_qa_csv.py` were originally written against the pilot's
 ~1,700 pairs and held everything in memory: all of `chunks.jsonl` as a dict
 (~1.1 GB) plus every finished record in a list (~2.5 GB). At the full
 corpus that is several GB of live objects, which does not fit alongside a
@@ -710,9 +746,9 @@ corpus that is several GB of live objects, which does not fit alongside a
 full scale had to be killed before it started swapping. Both now:
 
 - index `chunks.jsonl` by **byte offset** (~40 MB) and `seek()` per record,
-  the same approach `generate_qa_openrouter.py` already used on that file;
+  the same approach `pipeline/generate_qa_openrouter.py` already used on that file;
 - write each record as it is built rather than collecting it;
-- keep only bounded per-cell buffers for the samples — `export_qa_csv.py`
+- keep only bounded per-cell buffers for the samples — `export/export_qa_csv.py`
   uses reservoir sampling, since it cannot hold the population to draw from.
 
 Result: 952k records in 37 s at flat memory, versus not completing at all.
@@ -724,7 +760,7 @@ fine. `--token-check-sample` (default 25,000) controls it, `0` tokenizes
 everything, and `report.md` states which coverage produced the number. This
 does not touch the deliverable — every record is still written.
 
-[build_record](compile_qa_dataset.py#L76-L103) wraps every generated
+[build_record](pipeline/compile_qa_dataset.py#L76-L103) wraps every generated
 `{question, answer, question_type, reasoning}` pair with its source chunk's
 text into the agreed schema. A `CONTEXT_RATIO` share (default 0.7) of
 records get a `Context: ...` block in the user message; the rest are a bare
@@ -774,19 +810,114 @@ template does *not* specially handle (it just becomes literal text in the
 answer) -- confirming the partner's instruction that reasoning has to live
 in its own field, not inline in the content.
 
-[main()](compile_qa_dataset.py#L134-L222) writes `output/dataset/qa_pairs.jsonl`
+[main()](pipeline/compile_qa_dataset.py#L134-L222) writes `output/dataset/qa_pairs.jsonl`
 (the full set), `sample.jsonl` (up to `--sample-size` records, built by
-[build_sample](compile_qa_dataset.py#L114-L131), which round-robins across
+[build_sample](pipeline/compile_qa_dataset.py#L114-L131), which round-robins across
 every `(question_type, context_mode)` combination actually generated so a
 small sample still shows every type instead of whichever came first), and
 `report.md` (counts per source/question_type/context_mode, how many records
 carry a `reasoning` field, and how many exceed a 1,300-token flag threshold).
 That check uses
-[record_prompt_tokens](compile_qa_dataset.py#L106-L111), which calls
+[record_prompt_tokens](pipeline/compile_qa_dataset.py#L106-L111), which calls
 [gemma_tokenizer.count_prompt_tokens](gemma_tokenizer.py#L88-L99): tokens for
 system + question + context only, rendered exactly as Gemma would see them
 before generating (`add_generation_prompt=True`) -- the answer is
 deliberately excluded, per the confirmed budget below.
+
+## The dataset as a table, and publishing it
+
+```bash
+python3 qa_generation/export/export_dataset_table.py --verify
+```
+
+[export_dataset_table.py](export/export_dataset_table.py) flattens
+`output/dataset/qa_pairs.jsonl` to CSV and Parquet. It reads **the
+deliverable itself**, not the generation records, which is the entire point:
+`export/export_qa_csv.py` builds a review sheet of a deliberately different shape
+(extra QC columns, no `context_mode`, and it includes pairs whose chunk text
+went missing), so it carries 952,822 rows against the deliverable's 952,801
+and shows raw chunks rather than the user message actually trained on. Using
+it as "the dataset in CSV form" would be wrong on all three counts.
+
+| output | size |
+|---|---|
+| `output/dataset/qa_pairs.csv` | 2.33 GB |
+| `output/dataset/parquet/train-0000{0..3}-of-00004.parquet` | 0.35 GB total |
+
+Columns are the JSONL content and nothing derived: `system`, `user`,
+`assistant`, `reasoning`, `document_id`, `chunk_id`, `source`,
+`question_type`, `context_mode`. `user` is kept whole rather than split into
+question/context columns — context is ~90% of the bytes, so carrying it
+twice would nearly double a multi-GB file, and the joined string is what the
+model is trained on.
+
+`--verify` reconstructs records from the written table and diffs them
+against the source JSONL, streaming both rather than loading either:
+currently `952,801 vs 952,801 MATCH, 0 mismatches`.
+
+### Uploading to a private Hub dataset repo
+
+Prefer Parquet: 7x smaller, typed, and read natively by the dataset viewer.
+The shard names already follow the Hub convention, and
+[hf_dataset_card.md](hf_dataset_card.md) carries matching YAML front matter
+(`data_files: data/train-*.parquet`) plus a Known Issues section.
+
+```bash
+conda activate ai                       # the hf CLI lives in this env
+hf auth login                           # write-scoped token
+hf repo create bahdini-qa-pairs --repo-type dataset --private
+hf upload <user>/bahdini-qa-pairs qa_generation/output/dataset/parquet data --repo-type dataset
+hf upload <user>/bahdini-qa-pairs qa_generation/hf_dataset_card.md README.md --repo-type dataset
+```
+
+Note that HuggingFace has restricted the **dataset viewer on private repos**
+to PRO/Enterprise accounts. Files and `load_dataset` work regardless; the
+browsable table may not render on a free account until the repo is public.
+Worth re-checking against current Hub docs rather than trusting this line.
+
+## The outlier sheet
+
+```bash
+python3 qa_generation/export/export_outliers.py                      # default
+python3 qa_generation/export/export_outliers.py --context-chars 0    # full context
+```
+
+[export_outliers.py](export/export_outliers.py) puts every anomaly found while
+building this corpus into one reviewable CSV, `output/dataset/qa_outliers.csv`
+(263 MB), one row per flagged pair. Rows are keyed by `row_index`, the
+0-based line in `qa_pairs.jsonl`, so a decision made here maps back exactly:
+`sed -n "$((row_index+1))p" qa_pairs.jsonl`.
+
+Current counts — 103,357 rows flagged, **10.85%** of the dataset (a row can
+carry several flags):
+
+| flag | rows | |
+|---|---|---|
+| `sorani_answer` | 41,512 | heuristic; the answer reads as Sorani |
+| `sorani_context` | 28,272 | heuristic; Sorani context inside a `with_context` prompt — the case that actually leaks into training |
+| `duplicate_question` | 25,441 | question string repeats an earlier row; `duplicate_of_row` points at the first |
+| `latin_in_answer` | 13,593 | objective violation of the prompt's Latin-script ban; `latin_sample` shows the substrings |
+| `offpipeline_model` | 391 | from the 175-chunk one-off experiment |
+| `long_prompt` | 27 | over the 1,300-token flag threshold |
+| `offlist_question_type` | 4 | `descriptive` / `comparative` |
+| `missing_context` | 0 | confirms the 21 orphaned pairs never entered the deliverable |
+
+**The two Sorani rows are the weakest numbers in that table** and should be
+read as "size of the queue to inspect", not "number of bad rows" — no
+validated threshold, and markers like `بۆ`/`ئەم` occur in both dialects.
+`sorani_score` and `bahdini_score` are exposed as columns precisely so the
+cutoff can be re-judged in a spreadsheet. The honest next step is labelling a
+few hundred by eye and calibrating against those labels. Highest-yield slice
+to start on: `flag_sorani_context=1` filtered to `facebook` and `zcks`.
+
+Two implementation notes. `long_prompt` requires tokenizing, so only records
+long enough to plausibly exceed 1,300 tokens are measured (`>= 1900` chars —
+chunks cap at 1,050 tokens and the document gate floors chars/token at 1.5,
+so nothing shorter can reach it); `--max-tokenize` caps the work and the
+script **says so in its output when the cap is hit**, since a silently
+truncated flag is worse than a slow one. And `duplicate_question` hashes
+questions with blake2b rather than comparing strings, keeping ~950k entries
+in a dict instead of the questions themselves.
 
 ## Confirmed with the partner
 
@@ -801,7 +932,7 @@ changed in [qa_config.py](qa_config.py) as a result:
    the answer, and it's a mean, not a hard cap ("ok to go over in some
    cases"). This raised the context target from 700 to
    [TARGET_CHUNK_TOKENS = 900](qa_config.py#L50-L63) (cap 1050) and moved
-   the QC check in `compile_qa_dataset.py` from full-record tokens to
+   the QC check in `pipeline/compile_qa_dataset.py` from full-record tokens to
    prompt-only tokens (see above).
 3. **Not every pair needs context.** [CONTEXT_RATIO = 0.7](qa_config.py#L83-L88)
    controls the with/without split, surfaced in `metadata.context_mode`.
@@ -822,4 +953,4 @@ changed in [qa_config.py](qa_config.py) as a result:
 Two judgment calls made here that the partner didn't spell out, both easy
 to change in `qa_config.py` if they want something different:
 `QA_SYSTEM_PROMPT_NO_CONTEXT`'s exact wording, and the 1,300-token flag
-threshold (a 30% allowance over the ~1,000 mean) in `compile_qa_dataset.py`.
+threshold (a 30% allowance over the ~1,000 mean) in `pipeline/compile_qa_dataset.py`.

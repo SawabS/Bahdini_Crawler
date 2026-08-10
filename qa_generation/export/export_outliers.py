@@ -50,8 +50,15 @@ import hashlib
 import json
 import re
 import sys
+from pathlib import Path
 import time
 from collections import Counter
+
+# qa_config and gemma_tokenizer live one level up, in qa_generation/, and
+# are shared by every stage. Adding the parent explicitly keeps these
+# runnable as plain scripts from anywhere -- `python3 qa_generation/export/
+# export_outliers.py` -- rather than only from their own directory.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import gemma_tokenizer as gtok
 import qa_config as cfg

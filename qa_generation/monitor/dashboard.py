@@ -42,6 +42,12 @@ from collections import Counter, deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+# qa_config and gemma_tokenizer live one level up, in qa_generation/, and
+# are shared by every stage. Adding the parent explicitly keeps these
+# runnable as plain scripts from anywhere -- `python3 qa_generation/export/
+# export_outliers.py` -- rather than only from their own directory.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import qa_config as cfg
 
 PORT = 8765
@@ -58,7 +64,7 @@ TOTAL_CHUNKS = 246_515          # qa_generation/output/chunks_report.md, post-fi
 # sans that is freely redistributable. Adobe Arabic and Calibri are both
 # proprietary and absent from this machine; relying on either would have
 # silently fallen through to the same generic default it replaces.
-ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
 FONT_FILES = {
     "ibm-plex-sans-arabic-400.woff2",
     "ibm-plex-sans-arabic-600.woff2",
