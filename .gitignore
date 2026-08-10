@@ -38,3 +38,5 @@ qa_generation/output/
 .env
 graphify-out
 CLAUDE.md
+# vendored mermaid runtime for md_to_pdf.py: 3.4MB, re-downloaded automatically
+qa_generation/report/mermaid.min.js

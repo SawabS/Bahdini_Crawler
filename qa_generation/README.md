@@ -919,6 +919,60 @@ truncated flag is worse than a slow one. And `duplicate_question` hashes
 questions with blake2b rather than comparing strings, keeping ~950k entries
 in a dict instead of the questions themselves.
 
+## The build report (PDF)
+
+```bash
+python3 qa_generation/export/make_report_figures.py   # 8 PNGs -> output/figures/
+bash qa_generation/report/build.sh                    # two XeLaTeX passes -> PDF
+```
+
+[report/qa_generation_report.tex](report/qa_generation_report.tex) is the
+single-source-of-truth document for this pipeline: A4, ~1,000 lines, styled per
+the repo's [SKILL.md](../SKILL.md) editorial system. It starts at the finished
+chunk queue and runs to the delivered dataset, carrying every measured number
+(API calls, billed input/output tokens, cost, status breakdown, token budget,
+distributions, composition, quality flags), the complete v3 prompt verbatim,
+and four TikZ diagrams — the end-to-end flow with its resume edge, the
+status/retry state machine, the chunk→pairs→context-mode fan-out that explains
+how 246,515 chunks become 952,801 records, and the record anatomy.
+
+`build.sh` runs **two** passes deliberately: the first writes the `.toc`, the
+second reads it back. A single pass silently produces an empty table of
+contents.
+
+### Toolchain notes
+
+TeX Live is installed **user-locally** at `~/texlive/2026`. TeX Live's own
+installer accepts a `--texdir` prefix, so a full-scheme install needs no `sudo`
+and no MacTeX `.pkg`:
+
+```bash
+curl -fsSL https://mirror.ctan.org/systems/texlive/tlnet/install-tl-unx.tar.gz | tar xz
+cd install-tl-* && ./install-tl -no-interaction -scheme scheme-full -texdir "$HOME/texlive/2026"
+export PATH="$HOME/texlive/2026/bin/universal-darwin:$PATH"
+```
+
+`build.sh` probes `~/texlive/*/bin/*/` before `/Library/TeX/texbin`, so it works
+against either that install or a system MacTeX.
+
+Two deliberate deviations from `SKILL.md`, both to keep the document buildable:
+
+- **No `bidi` package.** It must load last and is known to conflict with
+  `tcolorbox` and `tikz`, which this document uses heavily. The Kurdish
+  excerpts are short self-contained runs, so they use XeTeX's own
+  `\beginR`/`\endR` via a `\kurd{}` macro instead — same rendering, no package
+  conflict.
+- **Guarded font fallbacks.** `\newfontfamily` on a missing font is a hard
+  build failure, and `Noto Naskh Arabic`, `Poppins`, `Inter` and
+  `Linux Libertine O` were all absent here. Every family falls through a chain
+  ending in something TeX Live or macOS always ships (`TeX Gyre Heros`,
+  `Geeza Pro`, `Menlo`). Install the preferred faces and they are picked up
+  automatically.
+
+Figures come from [export/make_report_figures.py](export/make_report_figures.py)
+and are written with `facecolor="white"` so they sit flush on the white page
+rather than showing a tinted rectangle.
+
 ## Confirmed with the partner
 
 Answers to the open questions from the earlier email thread, and what
