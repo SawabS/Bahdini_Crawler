@@ -36,7 +36,10 @@ gemini_ocr_pipeline/output/
 qa_generation/output/
 
 .env
+.codex
+.claude
 graphify-out
 CLAUDE.md
+AGENTS.md
 # vendored mermaid runtime for md_to_pdf.py: 3.4MB, re-downloaded automatically
 qa_generation/report/mermaid.min.js
